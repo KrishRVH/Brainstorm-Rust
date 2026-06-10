@@ -1,4 +1,5 @@
 pub mod config;
+pub mod cuda;
 pub mod kernels;
 pub mod rng;
 pub mod search;

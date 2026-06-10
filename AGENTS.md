@@ -1,110 +1,59 @@
 # Repository Guidelines
 
-Brainstorm is a Balatro mod with Lua UI/hooks and a native Rust DLL named
-Immolate. Keep agent work source-faithful, scoped, and validated.
+Quick reference for contributing to Brainstorm (Balatro mod with a native DLL).
 
-## Non-Negotiables
-- Credits must stay intact: Brainstorm by OceanRamen, fork/rewrite by KRVH,
-  Immolate by MathIsFun0. Steamodded metadata and shipped notices must credit
-  OceanRamen and KRVH.
-- `BalatroSource/` is the literal game source. Never commit it. Use it as the
-  source of truth for game mechanics.
-- `BalatroSource_Guide.md` is the verified map of source mechanics; update it
-  only after checking `BalatroSource/`.
-- Runtime config is generated in Balatro's Love save directory. Do not ship or
-  commit generated `config.lua`.
-- Logging is intentionally off. `immolate_set_log_path` remains a Rust no-op
-  ABI export unless explicitly re-enabled.
-- Do not commit `release/` payloads or generated zips.
+## Credits
+- Brainstorm created by OceanRamen. Rewrite by KRVH.
+- Immolate created by MathIsFun0.
 
-## Project Map
-- Lua entry/UI: `Brainstorm.lua`, `UI.lua`.
-- Mod metadata/compat: `lovely.toml`, `steamodded_compat.lua`, `nativefs.lua`.
-- Rust crate: `Immolate/`; implementation in `Immolate/src/`.
-- Benchmark catalog: `Immolate/src/bench_cases.rs`.
-- Rust DLL artifact: `target/rust/Immolate.dll`, staged as `Immolate.dll`.
-- Version source of truth: `[manifest].version` in `lovely.toml`; keep
-  `steamodded_compat.lua` in sync with `VERSION=x.y mise run bump-version`.
-- Docs: `README.md`, `AGENTS.md`, `BalatroSource_Guide.md`,
-  `Immolate/BENCH.md`, `NOTICE.md`.
+## Project Structure & Module Organization
+- Lua entry/UI: `Brainstorm.lua`, `UI.lua`; config/compat in `config.lua`, `lovely.toml`, `nativefs.lua`, `steamodded_compat.lua`.
+- Native sources: `Immolate/Rust/` is the only Rust DLL implementation. `Immolate/CPP/*.cpp` and `Immolate/CPP/*.hpp` remain the C++ oracle (CPU-only; entry is `Immolate/CPP/brainstorm.cpp`).
+- Artifacts: DLL is `Immolate.dll` (default). Build/lint/format/deploy all use `mise.toml`. The C++ oracle artifact is kept under `target/cpp/`, and the current Rust artifact is kept under `target/rust/`.
+- `BalatroSource/` is the literal game source; never commit it to git and always use it as the source of truth for understanding game behavior.
+- `BalatroSource_Guide.md` summarizes seed/search-relevant mechanics verified from `BalatroSource/`.
+- Logging is currently disabled in Lua/C++ and the Rust `immolate_set_log_path` export is a no-op; keep it off unless explicitly re-enabled.
 
-## Commands
-- First checkout: `mise trust`.
-- Tooling/deps: `mise run setup`, then `mise run doctor`.
-- Build DLL: `mise run build`.
+## Build and Development Commands
+- First run in a checkout: `mise trust`.
+- Install mise-managed tools and local Lua lint tools: `mise run setup`.
+- Dependency check: `mise run doctor`.
+- Build: `mise run build` outputs the Rust `Immolate.dll`.
+- C++ oracle: `mise run build-cpp`.
 - Rust validation: `mise run check-rust`.
-- Full validation: `mise run check`.
-- Format: `mise run format`.
-- Lint only: `mise run lint`.
+- C++ vs Rust parity: `mise run compare`.
+- Benchmarks: `mise run bench-compare`.
+- Strict full-suite benchmark gate: `mise run bench-full`.
+- Actual Lua UI UX benchmark gate: `mise run bench-ux`.
+- Pretty full-suite dashboard: `mise run bench-pretty`.
+- Deploy: `TARGET=/mnt/c/Users/Krish/AppData/Roaming/Balatro/Mods/Brainstorm mise run deploy`.
+- Release: `mise run release` (runs `mise run check`, builds the DLL, and zips `release/Brainstorm_v3.1.zip`).
+- Dev release workflow: `.github/workflows/dev-release.yml` publishes/updates the `dev-release` prerelease on `master` pushes and manual dispatch.
+- Formatting: `mise run format` (runs stylua/clang-format/rustfmt when available).
+- Lint: `mise run lint` (stylua, LuaJIT bytecode syntax, luacheck,
+  clang-format, rustfmt, and clippy checks).
 - Clean: `mise run clean`.
-- Deploy: `mise run deploy`, or
-  `TARGET=/path/to/Balatro/Mods/Brainstorm mise run deploy`.
-- Release: `mise run release`.
-- Version bump: `VERSION=3.2 mise run bump-version`.
-- Bench current DLL: `BENCH_CASE=ux BENCH_BUDGET=100000 mise run bench`.
-- Compare to Original DLL: `mise run bench-compare`.
-- Full reports: `mise run bench-full` for TSV automation and
-  `mise run bench-pretty` for a compact human-readable report. Both use
-  `threads=0` and fail if any comparable Rust/original case drops below parity.
-- UX-fixture report: `mise run bench-ux` measures DLL calls using
-  UI-reachable cases and `threads=0`; it is not an in-game Lua profiler.
-- Native core benchmark:
-  `cargo run --manifest-path Immolate/Cargo.toml --release --bin brainstorm_bench -- --case ux --budget 100000 --threads 0 --repeat 5 --warmup 2`.
+- No standalone scripts or test runners; use the mise tasks and validate in-game.
 
-## Current Search Semantics
-- FFI entry:
-  `brainstorm_search(seed_start, voucher_key, pack_key, tag1_key, tag2_key, joker_name, joker_location, souls, observatory, perkeo, deck_key, erratic, no_faces, min_face_cards, suit_ratio, num_seeds, threads)`.
-- Pass Balatro keys such as `v_telescope`, `tag_charm`,
-  `p_spectral_mega_1`; always `free_result()` non-empty FFI results and wrap
-  Lua FFI calls in `pcall`.
-- First-shop model: first booster slot is forced normal Buffoon; second booster
-  slot is rolled from the shop pack pool. Pack filters check these two slots.
-- Voucher filter checks the ante-1 voucher and respects deck-start vouchers and
-  voucher upgrade locks.
-- Observatory means ante-1 Telescope plus a Mega Celestial pack in the first
-  shop. It reuses the same voucher/pack rolls; it is not the voucher's scoring
-  effect.
-- Perkeo search means a soulable pack produces The Soul and the legendary roll
-  yields Perkeo. It does not simulate Perkeo's later copy effect.
-- Soul filters apply only to Arcana/Spectral packs in the first shop. Because
-  only one of the two first-shop packs can be soulable and The Soul locks after
-  generation, `souls > 1` is impossible and rejected statically.
-- Joker search checks the first shop: `shop` scans shop Joker slots, `pack`
-  scans Buffoon packs, and `any` checks both. Pack Joker search respects the
-  selected pack filter.
-- Direct Joker targets exclude first-shop impossibilities: Legendary/Soul-only
-  Jokers, enhancement-gated Jokers, pool-flag-gated Jokers, and the native
-  first-shop blocked pool targets such as Cavendish, Steel Joker, Stone Joker,
-  Lucky Cat, Golden Ticket, and Glass Joker.
-- Erratic Deck filters simulate 52 fixed source-order draws. `no_faces` discards
-  face samples after sampling; they are not replaced.
-- Rust search must preserve earliest matching seed semantics for single-thread
-  and parallel searches.
+## Architecture & FFI Safety
+- DLL entry: `immolate.brainstorm_search(seed_start, voucher_key, pack_key, tag1_key, tag2_key, joker_name, joker_location, souls, observatory, perkeo, deck_key, erratic, no_faces, min_face_cards, suit_ratio, num_seeds, threads)`; pass Balatro keys (e.g. `v_telescope`, `tag_charm`, `p_spectral_mega_1`), always `free_result()` on non-empty returns, and wrap FFI in `pcall`.
+- Lua loads `Immolate.dll`.
+- CUDA is controlled only by the `AP: USE CUDA` setting in the Lua UI, which
+  calls `immolate_set_cuda_enabled`; do not add hidden runtime heuristics for
+  whether to try the GPU path. Unsupported filters and unavailable CUDA drivers
+  fall back to the Rust CPU engine.
+- Pack filter simulates both shop pack slots; voucher check is ante-1 voucher; observatory reuses the same pack/voucher rolls, and Perkeo requires The Soul to roll Perkeo (legendary pool).
+- Joker search checks the first shop: location `shop` scans shop slots, `pack` scans Buffoon packs, `any` checks both (pack search respects the selected pack filter).
+- Soul checks only apply to Arcana/Spectral packs in the current shop slots.
+- Auto-reroll UI shows live scanned seed counts; SPF options go from 1,000 to 1,000,000 seeds per pass.
+- Rust search must preserve earliest matching seed semantics for both single-thread and parallel searches. Benchmark result mismatches fail the harness, even when the timing is faster.
 
-## Testing Expectations
-- Immolate has source-oracle tests that compare optimized Rust predicates and
-  searches against the source-faithful `Instance` model for target seeds and
-  edge windows. Keep these tests broad when changing RNG, filters, locks, pack
-  generation, Joker pools, Soul/Perkeo, Observatory, or Erratic logic.
-- Add/update benchmark fixtures in `Immolate/src/bench_cases.rs` when a user
-  workflow or hot path changes.
-- The Original Brainstorm DLL is a historical performance baseline, not the
-  correctness oracle. `BENCH_FAIL_ON_MISMATCH=1` is only for intentional legacy
-  parity audits.
-- For Lua behavior, validate with `mise run lint-lua`; for full confidence run
-  `mise run check`.
+## Coding Style & Naming Conventions
+- Lua: Stylua (`stylua.toml`) — 2-space indent, ~80 cols. Avoid globals, return tables explicitly.
+- Rust: rustfmt and clippy; keep unsafe isolated at FFI/harness boundaries.
+- C++: C++17 with RAII; keep stdout minimal. clang-format when available.
+- Naming: Lua locals/functions lower_snake; constants upper snake (`Brainstorm.VERSION`); C++ types PascalCase, file-scope statics as needed.
 
-## Style
-- Lua: Stylua, 2-space indent, minimal comments, no accidental globals, return
-  tables explicitly where modules do so.
-- Rust: rustfmt + clippy; keep unsafe isolated at FFI/harness boundaries.
-- Prefer local patterns over new abstractions. Add helpers only when they remove
-  real duplication or clarify source-parity rules.
-- Preserve user changes in a dirty worktree. Never reset/revert unrelated work.
-
-## Release Notes
-- `.github/workflows/release.yml` updates the production `latest` release on
-  `master` pushes and manual dispatch.
-- PRs should state intent, validation run, and whether binary artifacts changed
-  (`target/rust/Immolate.dll` or staged release DLLs). Attach UI screenshots for
-  visual changes.
+## Commit & Pull Request Guidelines
+- Use short, imperative subjects (scope prefix optional: `core:`, `ui:`, `dll:`). Do not commit `release/` artifacts.
+- In PRs, state intent and note binary artifacts touched (`Immolate.dll`). Attach UI screenshots for visual changes.

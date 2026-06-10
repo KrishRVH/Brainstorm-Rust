@@ -6,6 +6,8 @@ globals = {
     "G",
     "SMODS",
     "Brainstorm",
+    "Controller",
+    "Game",
     "STR_PACK",
     "STR_UNPACK",
     "pseudoseed",
@@ -40,7 +42,22 @@ read_globals = {
     "love",
     "ffi",
     "bit",
-    "jit"
+    "jit",
+    "random_string",
+    "number_format",
+    "Event",
+    "attention_text",
+    "play_sound",
+    "copy_table",
+    "lighten",
+    "darken",
+    "UIBox",
+    "DynaText",
+    "Particles",
+    "create_option_cycle",
+    "create_text_input",
+    "create_toggle",
+    "UIBox_button"
 }
 
 -- Performance: cache all globals
@@ -70,13 +87,14 @@ self = false
 exclude_files = {
     "BalatroSource/**",
     "tests/**",
+    "nativefs.lua",
     "*.min.lua"
 }
 
--- Module-specific overrides
-files["Core/logger.lua"] = {
-    -- Logger can have longer lines for formatted output
-    max_line_length = 150
+-- File-specific overrides
+files["Brainstorm.lua"] = {
+    -- Auto-reroll bridges UI state, game state, and FFI in one frame callback.
+    max_cyclomatic_complexity = 30
 }
 
 files["UI.lua"] = {

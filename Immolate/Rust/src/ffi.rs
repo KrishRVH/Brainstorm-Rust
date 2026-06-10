@@ -6,6 +6,7 @@ use std::ptr;
 use std::sync::Mutex;
 
 use crate::brainstorm_search_core;
+use crate::engine::cuda;
 use crate::filters::FilterConfig;
 
 static LAST_ERROR: Mutex<Option<CString>> = Mutex::new(None);
@@ -128,6 +129,11 @@ fn brainstorm_search_impl(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn immolate_set_log_path(_path: *const c_char) {}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn immolate_set_cuda_enabled(enabled: bool) {
+    cuda::set_cuda_enabled(enabled);
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn immolate_last_error() -> *const c_char {

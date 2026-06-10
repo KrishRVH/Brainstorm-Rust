@@ -596,6 +596,13 @@ function Brainstorm.build_settings_tab()
                 ),
               }),
               create_toggle({
+                label = "AP: USE CUDA",
+                scale = 0.8,
+                ref_table = Brainstorm.config.ar_prefs,
+                ref_value = "use_cuda",
+                callback = write_config,
+              }),
+              create_toggle({
                 label = "AR: INST OBSERVATORY",
                 scale = 0.8,
                 ref_table = Brainstorm.config.ar_filters,

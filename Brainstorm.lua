@@ -75,6 +75,7 @@ local DEFAULT_CONFIG = {
   ar_prefs = {
     spf_id = 7,
     spf_int = 100000,
+    use_cuda = true,
     face_count = 0,
     suit_ratio_id = 1,
     suit_ratio_percent = "Disabled",
@@ -334,6 +335,7 @@ function Brainstorm.normalize_config(source)
     if prefs.spf_int ~= nil then
       normalized.ar_prefs.spf_int = prefs.spf_int
     end
+    merge_bool(normalized.ar_prefs, prefs, "use_cuda")
     merge_int(normalized.ar_prefs, prefs, "face_count", 0, 35)
     merge_int(normalized.ar_prefs, prefs, "suit_ratio_id", 1)
     merge_string(normalized.ar_prefs, prefs, "suit_ratio_percent")
@@ -831,6 +833,7 @@ local function init_ffi()
       ffi.cdef,
       [[
       char* brainstorm_search(const char* seed_start, const char* voucher_key, const char* pack_key, const char* tag1_key, const char* tag2_key, const char* joker_name, const char* joker_location, double souls, bool observatory, bool perkeo, const char* deck_key, bool erratic, bool no_faces, int min_face_cards, double suit_ratio, long long num_seeds, int threads);
+      void immolate_set_cuda_enabled(bool enabled);
       void free_result(char* result);
     ]]
     )
@@ -949,6 +952,11 @@ function Brainstorm.auto_reroll()
   if not seed_budget then
     return false, "Auto-reroll stopped (invalid seed budget)"
   end
+  local use_cuda = Brainstorm.config.ar_prefs.use_cuda ~= false
+
+  pcall(function()
+    immolate.dll.immolate_set_cuda_enabled(use_cuda)
+  end)
 
   local call_success, result = pcall(
     immolate.brainstorm_search,

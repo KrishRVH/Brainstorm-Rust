@@ -932,7 +932,7 @@ mod tests {
 
     #[test]
     fn lua_joker_selector_rules_match_native_first_shop_impossibilities() {
-        const UI_LUA: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../UI.lua"));
+        const UI_LUA: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../UI.lua"));
 
         let impossible = [
             "Steel Joker",

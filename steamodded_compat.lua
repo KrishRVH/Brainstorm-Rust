@@ -2,6 +2,6 @@
 --- MOD_NAME: Brainstorm
 --- MOD_ID: Brainstorm
 --- PREFIX: brainstorm
---- MOD_AUTHOR: [OceanRamen, KRVH]
---- MOD_DESCRIPTION: The Balatro Reroll Mod. Original by OceanRamen. Rewrite by KRVH. Immolate by MathIsFun0.
+--- MOD_AUTHOR: [OceanRamen, KRVH, MathIsFun0]
+--- MOD_DESCRIPTION: The Balatro Reroll Mod. Rewrite by KRVH, Immolate by MathIsFun0
 --- VERSION: 3.1

@@ -1,0 +1,110 @@
+name: Dev Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dev-release
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: publish dev release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BUILD_SHA: ${{ github.sha }}
+      DEV_TAG: dev-release
+      DEV_TITLE: dev release
+      WINEDEBUG: -all
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-format \
+            file \
+            gcc-12 \
+            liblua5.1-0-dev \
+            lua5.1 \
+            luajit \
+            luarocks \
+            mingw-w64 \
+            nvidia-cuda-toolkit \
+            wine \
+            zip
+
+      - name: Set up mise
+        uses: jdx/mise-action@v2
+
+      - name: Trust mise config
+        run: mise trust
+
+      - name: Install mise tools
+        run: mise install
+
+      - name: Set up Rust target
+        run: rustup target add x86_64-pc-windows-gnu
+
+      - name: Install Lua lint tools
+        run: mise run setup-lua
+
+      - name: Build release zip
+        run: mise run release
+
+      - name: Stage release artifacts
+        run: |
+          mkdir -p release-dev
+          cp release/Brainstorm_v3.1.zip release-dev/
+          sha256sum release-dev/Brainstorm_v3.1.zip > release-dev/SHA256SUMS.txt
+
+      - name: Move dev tag to this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${DEV_TAG}" >/dev/null 2>&1; then
+            gh api \
+              -X PATCH \
+              "repos/${GITHUB_REPOSITORY}/git/refs/tags/${DEV_TAG}" \
+              -f sha="${BUILD_SHA}" \
+              -F force=true
+          else
+            gh api \
+              -X POST \
+              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${DEV_TAG}" \
+              -f sha="${BUILD_SHA}"
+          fi
+
+      - name: Publish dev release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Latest Brainstorm dev build for ${BUILD_SHA}. This prerelease and its ${DEV_TAG} tag are intentionally updated on every master push."
+
+          if gh release view "${DEV_TAG}" >/dev/null 2>&1; then
+            gh release edit "${DEV_TAG}" \
+              --target "${BUILD_SHA}" \
+              --title "${DEV_TITLE}" \
+              --notes "${notes}" \
+              --prerelease
+            gh release upload "${DEV_TAG}" release-dev/* --clobber
+          else
+            gh release create "${DEV_TAG}" release-dev/* \
+              --target "${BUILD_SHA}" \
+              --title "${DEV_TITLE}" \
+              --notes "${notes}" \
+              --prerelease
+          fi

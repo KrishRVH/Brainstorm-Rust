@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::engine::config::{CompiledFilter, KernelShape};
+use crate::engine::cuda::{CudaSearch, search_cuda};
 use crate::engine::kernels::apply_compiled_filter;
 use crate::engine::seed::SearchState;
 use crate::filters::FilterConfig;
@@ -17,6 +18,10 @@ pub fn brainstorm_search_core(
 ) -> Option<String> {
     let budget = resolve_seed_budget(num_seeds);
     let compiled = CompiledFilter::compile(cfg);
+    match search_cuda(seed_start, &compiled, budget) {
+        CudaSearch::Complete(result) => return result,
+        CudaSearch::Unsupported | CudaSearch::Unavailable => {},
+    }
     let thread_count = resolve_threads_for_engine(budget, threads, compiled.shape);
     search_filters(seed_start, compiled, budget, thread_count)
 }
