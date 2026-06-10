@@ -63,6 +63,7 @@ local DEFAULT_CONFIG = {
   },
   ar_prefs = {
     spf_int = 100000,
+    use_cuda = true,
     face_count = 0,
     suit_ratio_percent = "Disabled",
   },
@@ -259,7 +260,7 @@ function Brainstorm.normalize_config(source)
     merge_string(normalized.ar_filters, filters, "joker_name")
     merge_string(normalized.ar_filters, filters, "joker_search")
     merge_string(normalized.ar_filters, filters, "joker_location")
-    merge_int(normalized.ar_filters, filters, "soul_skip", 0, 5)
+    merge_int(normalized.ar_filters, filters, "soul_skip", 0, 1)
     merge_bool(normalized.ar_filters, filters, "inst_observatory")
     merge_bool(normalized.ar_filters, filters, "inst_perkeo")
     if
@@ -273,6 +274,7 @@ function Brainstorm.normalize_config(source)
   local prefs = source.ar_prefs
   if type(prefs) == "table" then
     merge_int(normalized.ar_prefs, prefs, "spf_int", 1)
+    merge_bool(normalized.ar_prefs, prefs, "use_cuda")
     merge_int(normalized.ar_prefs, prefs, "face_count", 0, 35)
     merge_string(normalized.ar_prefs, prefs, "suit_ratio_percent")
   end
@@ -478,21 +480,18 @@ function Brainstorm.save_state_alert(text)
 end
 
 function Brainstorm.save_game_state(slot)
-  if Brainstorm.is_enabled() and is_run_stage() then
-    local save_path = G.SETTINGS.profile
-      .. "/"
-      .. "save_state_"
-      .. slot
-      .. ".jkr"
-    local success = pcall(compress_and_save, save_path, G.ARGS.save_run)
-    if success then
-      Brainstorm.save_state_alert("Saved state to slot [" .. slot .. "]")
-      return true
-    else
-      Brainstorm.save_state_alert("Failed to save state")
-      return false
-    end
+  if not Brainstorm.is_enabled() or not is_run_stage() then
+    return false
   end
+
+  local save_path = G.SETTINGS.profile .. "/save_state_" .. slot .. ".jkr"
+  local success = pcall(compress_and_save, save_path, G.ARGS.save_run)
+  if success then
+    Brainstorm.save_state_alert("Saved state to slot [" .. slot .. "]")
+    return true
+  end
+
+  Brainstorm.save_state_alert("Failed to save state")
   return false
 end
 
@@ -500,7 +499,7 @@ function Brainstorm.load_game_state(slot)
   if not Brainstorm.is_enabled() or not is_run_stage() then
     return false
   end
-  local save_path = G.SETTINGS.profile .. "/" .. "save_state_" .. slot .. ".jkr"
+  local save_path = G.SETTINGS.profile .. "/save_state_" .. slot .. ".jkr"
   local success, saved_game = pcall(get_compressed, save_path)
 
   if success and saved_game then
@@ -511,14 +510,14 @@ function Brainstorm.load_game_state(slot)
       G:start_run({ savetext = G.SAVED_GAME })
       Brainstorm.save_state_alert("Loaded state from slot [" .. slot .. "]")
       return true
-    else
-      Brainstorm.save_state_alert("Corrupted save in slot [" .. slot .. "]")
-      return false
     end
-  else
-    Brainstorm.save_state_alert("No save in slot [" .. slot .. "]")
+
+    Brainstorm.save_state_alert("Corrupted save in slot [" .. slot .. "]")
     return false
   end
+
+  Brainstorm.save_state_alert("No save in slot [" .. slot .. "]")
+  return false
 end
 
 function Brainstorm.reroll()
@@ -655,7 +654,9 @@ local native_handle = nil
 local DLL_NAME = "Immolate.dll"
 
 local function native_exports(handle)
-  return handle.brainstorm_search, handle.free_result
+  return handle.brainstorm_search,
+    handle.free_result,
+    handle.immolate_set_cuda_enabled
 end
 
 local function init_ffi()
@@ -664,6 +665,7 @@ local function init_ffi()
       ffi.cdef,
       [[
       char* brainstorm_search(const char* seed_start, const char* voucher_key, const char* pack_key, const char* tag1_key, const char* tag2_key, const char* joker_name, const char* joker_location, double souls, bool observatory, bool perkeo, const char* deck_key, bool erratic, bool no_faces, int min_face_cards, double suit_ratio, long long num_seeds, int threads);
+      void immolate_set_cuda_enabled(bool enabled);
       void free_result(char* result);
     ]]
     )
@@ -686,8 +688,14 @@ local function load_native()
     return nil
   end
 
-  local exports_success, search_fn, free_fn = pcall(native_exports, handle)
-  if not exports_success or not search_fn or not free_fn then
+  local exports_success, search_fn, free_fn, set_cuda_enabled =
+    pcall(native_exports, handle)
+  if
+    not exports_success
+    or not search_fn
+    or not free_fn
+    or not set_cuda_enabled
+  then
     return nil
   end
 
@@ -695,6 +703,7 @@ local function load_native()
     dll = handle,
     brainstorm_search = search_fn,
     free_result = free_fn,
+    set_cuda_enabled = set_cuda_enabled,
   }
   return native_handle
 end
@@ -731,7 +740,7 @@ function Brainstorm.auto_reroll()
 
   local immolate = load_native()
   if not immolate then
-    return false, "Auto-reroll stopped (Immolate.dll missing)"
+    return false, "Auto-reroll stopped (Immolate.dll missing or incompatible)"
   end
 
   local pack_key = as_string(filters.pack)
@@ -748,6 +757,19 @@ function Brainstorm.auto_reroll()
   local seed_budget = current_seed_budget(prefs)
   if not seed_budget then
     return false, "Auto-reroll stopped (invalid seed budget)"
+  end
+
+  local cuda_enabled = as_bool(prefs.use_cuda)
+  if immolate.cuda_enabled ~= cuda_enabled then
+    local cuda_success, cuda_error =
+      pcall(immolate.set_cuda_enabled, cuda_enabled)
+    if not cuda_success then
+      return false,
+        "Auto-reroll stopped (CUDA setting failed: "
+          .. tostring(cuda_error)
+          .. ")"
+    end
+    immolate.cuda_enabled = cuda_enabled
   end
 
   local call_success, result = pcall(

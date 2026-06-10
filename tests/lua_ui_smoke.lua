@@ -1,6 +1,7 @@
 -- luacheck: globals Brainstorm G UIBox_button create_option_cycle create_tabs create_text_input create_toggle darken
 
 local repo = assert(arg[1], "repository path is required")
+local config_writes = 0
 
 Brainstorm = {
   DEFAULT_SPF_KEY = "100000",
@@ -29,11 +30,14 @@ Brainstorm = {
     },
     ar_prefs = {
       spf_int = 100000,
+      use_cuda = true,
       face_count = 0,
       suit_ratio_percent = "Disabled",
     },
   },
-  write_config = function() end,
+  write_config = function()
+    config_writes = config_writes + 1
+  end,
   reset_config = function() end,
 }
 
@@ -63,6 +67,7 @@ G = {
 }
 
 local cycles = {}
+local toggles = {}
 create_option_cycle = function(args)
   cycles[args.label] = args
   return args
@@ -71,6 +76,7 @@ create_text_input = function(args)
   return args
 end
 create_toggle = function(args)
+  toggles[args.label] = args
   return args
 end
 UIBox_button = function(args)
@@ -106,6 +112,13 @@ local face_options = cycles["ED: Min. # of Face Cards"].options
 local soul_options = cycles["AR: N. SOULS"].options
 assert(#face_options == 36 and face_options[1] == 0 and face_options[36] == 35)
 assert(#soul_options == 2 and soul_options[1] == 0 and soul_options[2] == 1)
+
+local cuda_toggle = toggles["AR: Use CUDA"]
+assert(cuda_toggle.ref_table == Brainstorm.config.ar_prefs)
+assert(cuda_toggle.ref_value == "use_cuda")
+cuda_toggle.ref_table[cuda_toggle.ref_value] = false
+cuda_toggle.callback()
+assert(not Brainstorm.config.ar_prefs.use_cuda and config_writes == 1)
 
 G.P_CENTER_POOLS.Joker[#G.P_CENTER_POOLS.Joker + 1] =
   { set = "Joker", name = "Beta", rarity = 2 }

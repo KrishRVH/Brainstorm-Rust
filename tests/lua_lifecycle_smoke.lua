@@ -2,6 +2,12 @@
 
 local repo = assert(arg[1], "repository path is required")
 local native_calls = {}
+local cuda_settings = {}
+local cuda_at_search = {}
+local active_cuda_setting
+local fail_cuda_setting = false
+local omit_cuda_export = false
+local ffi_declarations
 local native_loads = 0
 local native_handle_ref = setmetatable({}, { __mode = "v" })
 
@@ -11,19 +17,33 @@ end
 package.preload.ffi = function()
   return {
     NULL = {},
-    cdef = function() end,
+    cdef = function(declarations)
+      ffi_declarations = declarations
+    end,
     load = function(path)
       assert(path == repo .. "/Brainstorm/Immolate.dll")
       native_loads = native_loads + 1
       local handle = {
         brainstorm_search = function(...)
+          assert(active_cuda_setting ~= nil, "CUDA setting must precede search")
+          cuda_at_search[#cuda_at_search + 1] = active_cuda_setting
           native_calls[#native_calls + 1] = { ... }
           return nil
         end,
         free_result = function()
           error("nil native results must not be freed")
         end,
+        immolate_set_cuda_enabled = function(enabled)
+          if fail_cuda_setting then
+            error("synthetic CUDA setting failure")
+          end
+          cuda_settings[#cuda_settings + 1] = enabled
+          active_cuda_setting = enabled
+        end,
       }
+      if omit_cuda_export then
+        handle.immolate_set_cuda_enabled = nil
+      end
       native_handle_ref[1] = handle
       return handle
     end,
@@ -149,6 +169,7 @@ assert(written_config == "packed config")
 local config_identity = Brainstorm.config
 Brainstorm.reset_config()
 assert(Brainstorm.config == config_identity)
+assert(Brainstorm.config.ar_prefs.use_cuda)
 
 package.preload.brainstorm_supercharged_ui = function()
   error("synthetic UI module failure")
@@ -173,7 +194,11 @@ STR_UNPACK = function(packed)
   return {
     enable = false,
     ar_filters = { pack = "p_arcana_normal_1" },
-    ar_prefs = { spf_int = 250000, suit_ratio_percent = "75%" },
+    ar_prefs = {
+      spf_int = 250000,
+      use_cuda = false,
+      suit_ratio_percent = "75%",
+    },
   }
 end
 Brainstorm.load_config()
@@ -181,6 +206,7 @@ assert(Brainstorm.config == config_identity)
 assert(not Brainstorm.config.enable)
 assert(Brainstorm.config.ar_filters.pack == "p_arcana_normal_1")
 assert(Brainstorm.config.ar_prefs.spf_int == 250000)
+assert(not Brainstorm.config.ar_prefs.use_cuda)
 assert(Brainstorm.config.ar_prefs.suit_ratio_percent == "75%")
 assert(written_config == nil)
 
@@ -203,6 +229,7 @@ local normalized = Brainstorm.normalize_config({
   ar_prefs = {
     spf_int = 250000,
     spf_id = 2,
+    use_cuda = false,
     suit_ratio_percent = "75%",
     suit_ratio_id = 6,
     suit_ratio_decimal = 0.1,
@@ -211,6 +238,7 @@ local normalized = Brainstorm.normalize_config({
 assert(normalized.ar_filters.pack == "p_arcana_normal_1")
 assert(normalized.ar_filters.voucher_name == "v_telescope")
 assert(normalized.ar_prefs.spf_int == 250000)
+assert(not normalized.ar_prefs.use_cuda)
 assert(normalized.ar_prefs.suit_ratio_percent == "75%")
 for _, key in ipairs({
   "pack_id",
@@ -228,6 +256,13 @@ end
 assert(
   Brainstorm.normalize_config({ ar_filters = { pack = { "legacy" } } }).ar_filters.pack
     == ""
+)
+assert(
+  Brainstorm.normalize_config({ ar_prefs = { use_cuda = "legacy" } }).ar_prefs.use_cuda
+)
+assert(
+  Brainstorm.normalize_config({ ar_filters = { soul_skip = 5 } }).ar_filters.soul_skip
+    == 1
 )
 
 local function assert_native_call(actual, expected)
@@ -259,12 +294,23 @@ filters.inst_perkeo = false
 prefs.face_count = 12
 prefs.suit_ratio_percent = "75%"
 prefs.spf_int = 100000
+prefs.use_cuda = true
 G.GAME = {
   stake = 2,
   seeded = true,
   selected_back_key = { key = "b_red" },
   starting_params = {},
 }
+omit_cuda_export = true
+local missing_result, missing_error = Brainstorm.auto_reroll()
+assert(
+  missing_result == false
+    and missing_error
+      == "Auto-reroll stopped (Immolate.dll missing or incompatible)"
+)
+assert(#native_calls == 0 and #cuda_settings == 0)
+omit_cuda_export = false
+seed_number = 0
 assert(Brainstorm.auto_reroll() == nil)
 
 filters.voucher_name = "v_clearance_sale"
@@ -285,7 +331,16 @@ G.GAME.starting_params.no_faces = true
 assert(Brainstorm.auto_reroll() == nil)
 
 assert(Brainstorm.config == config_identity)
-assert(native_loads == 1 and #native_calls == 2)
+assert(native_loads == 2 and #native_calls == 2)
+assert(
+  ffi_declarations:find(
+    "void immolate_set_cuda_enabled(bool enabled);",
+    1,
+    true
+  )
+)
+assert(#cuda_settings == 1 and cuda_settings[1] == true)
+assert(cuda_at_search[1] == true and cuda_at_search[2] == true)
 assert_native_call(native_calls[1], {
   "SEED0001",
   "v_telescope",
@@ -324,6 +379,32 @@ assert_native_call(native_calls[2], {
   250000,
   0,
 })
+
+prefs.use_cuda = false
+assert(Brainstorm.auto_reroll() == nil)
+assert(#native_calls == 3)
+assert(#cuda_settings == 2 and cuda_settings[2] == false)
+assert(cuda_at_search[3] == false)
+assert(native_calls[3][1] == "SEED0003")
+for index = 2, 17 do
+  assert(native_calls[3][index] == native_calls[2][index])
+end
+
+fail_cuda_setting = true
+prefs.use_cuda = true
+local cuda_result, cuda_error = Brainstorm.auto_reroll()
+assert(cuda_result == false and cuda_error:find("CUDA setting failed", 1, true))
+assert(#native_calls == 3 and #cuda_settings == 2)
+
+fail_cuda_setting = false
+assert(Brainstorm.auto_reroll() == nil)
+assert(#native_calls == 4)
+assert(#cuda_settings == 3 and cuda_settings[3] == true)
+assert(cuda_at_search[4] == true)
+assert(native_calls[4][1] == "SEED0005")
+for index = 2, 17 do
+  assert(native_calls[4][index] == native_calls[3][index])
+end
 collectgarbage()
 collectgarbage()
 assert(native_handle_ref[1] ~= nil)

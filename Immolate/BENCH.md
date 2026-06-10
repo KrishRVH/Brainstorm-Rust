@@ -13,6 +13,8 @@ historical DLL and reports comparable result mismatches. It skips fixtures the
 older ABI cannot represent. For measured legacy hits, it preserves the raw
 result and computes scanned work using the Original DLL's length-major
 lexicographic seed order, which differs from the current Rust search order.
+The Rust CPU result and scanned count are the correctness oracle for every CUDA
+measurement; any CPU/GPU mismatch is a hard failure.
 
 Use `BENCH_THREADS=0` for user-facing comparisons and UX reports. That is the
 Lua auto-reroll call path, so it measures what players actually experience.
@@ -95,6 +97,12 @@ Run the DLL UX-fixture report:
 mise run bench-ux
 ```
 
+Run long CUDA windows through the native Windows DLL and driver from WSL:
+
+```bash
+mise run bench-cuda-long-windows
+```
+
 Run one profiling group:
 
 ```bash
@@ -119,7 +127,16 @@ then runs `mise run doctor` to check the system dependencies.
 - MinGW-w64 for Windows target linking and DLL inspection.
 - Wine for running the Windows DLL harness.
 - `sha256sum` for benchmark artifact integrity checks.
-- WSL interoperability (`wslpath` and `cmd.exe`) for native-Windows timing.
+- WSL interoperability (`wslpath`, `cmd.exe`, and `powershell.exe`) for
+  native-Windows timing.
+- CUDA Toolkit with `nvcc` for the GPU-enabled build. Set
+  `BRAINSTORM_SKIP_CUDA_BUILD=1` only for an intentional CPU-fallback build.
+  The defaults are `BRAINSTORM_CUDA_ARCH=sm_89` and `CUDAHOSTCXX=gcc-12`;
+  `NVCC` can select a non-default compiler binary. Each build embeds one
+  precompiled GPU architecture, so set `BRAINSTORM_CUDA_ARCH` to the test GPU's
+  `sm_*` architecture. An incompatible module falls back to Rust CPU and
+  therefore fails strict `cuda-long` backend attestation. Initialization and
+  runtime failures remain latched until the harness process restarts.
 
 Wine may print a `wine32 is missing` warning on Linux. That warning is not a
 failure for this project as long as the 64-bit harness continues and exits
@@ -129,11 +146,12 @@ successfully.
 
 The mise tasks read these environment variables:
 
-- `BENCH_CASE=all|baseline|tags|vouchers|packs|jokers|souls|deck|ux|CASE_NAME`
+- `BENCH_CASE=all|cuda-long|baseline|tags|vouchers|packs|jokers|souls|deck|ux|CASE_NAME`
 - `BENCH_BUDGET=1000000`
 - `BENCH_REPEAT=5`
 - `BENCH_WARMUP=1`
 - `BENCH_THREADS=0`
+- `BENCH_CUDA=default|off|both`
 - `BENCH_MIN_RATIO=1.0`
 - `BENCH_FAIL_ON_MISMATCH=0`
 - `BENCH_FORMAT=pretty|tsv`
@@ -167,6 +185,25 @@ in different orders. Set `BENCH_MIN_RATIO=0.0` only when you want a diagnostic
 report without a speed gate.
 `BENCH_MIN_RATIO` must be finite and non-negative.
 
+`BENCH_CUDA=both` alternates paired CPU/CUDA-enabled samples, uses the p50
+latency ratio, and requires exact result and scanned-count parity. Every call's
+reported backend is queried outside the timed region: CPU arms must report CPU,
+`rust-cuda` means the GPU actually ran, and `rust-cuda-not-used` means an
+enabled regular fixture completed without GPU work, including serial-prefix
+hits and CPU fallback. The `cuda-long` fixtures fail
+if any CUDA-enabled probe, warmup, or measured call falls back. `default`
+preserves the DLL's current setting for historical current-ABI measurements;
+`off` explicitly attests the CPU path. Wine is useful for ABI and fallback
+checks, but native Windows is the performance authority for the Windows CUDA
+driver. The harness reads this status through the
+`immolate_last_search_used_cuda` export; it is not inferred from timing.
+The harness reports phase-zero calls that actually use the GPU as CUDA probe
+rows. In a fresh harness process, the first such row includes lazy driver,
+context, and precompiled-module startup; later probes are warm. The paired
+summary describes steady-state search latency.
+CUDA speed ratios are informational; CPU/GPU result, scanned-count, and backend
+attestation are the hard gates.
+
 `BENCH_FAIL_ON_MISMATCH=0` keeps Rust/original result differences report-only,
 which is the default because the Original DLL is a historical performance
 baseline and its ABI/semantics do not cover every current Brainstorm
@@ -186,6 +223,8 @@ includes:
 - informational Rust/original result mismatches where the historical DLL differs
 - scanned percentage, so early-hit fixtures are obvious
 - mean and p95 latency (full distribution metrics remain available in TSV)
+- counterbalanced CPU/CUDA-enabled p50 ratios, actual backend, and CV for both
+  arms
 - `ns/seed`, which is often the clearest hot-path metric
 - coefficient of variation (`cv`) to flag noisy measurements
 - Rust/original speedup ratio
@@ -211,6 +250,8 @@ helper.
 - `ux-*`: UI-reachable combinations derived from the Lua controls, including
   duplicate tags, forced Buffoon packs, no-pack Soul/Joker searches, special
   deck shop rates, Soul+Perkeo searches, and harder Erratic combinations.
+- `cuda-long-*`: supported full-window GPU fixtures intended for native-Windows
+  CPU/CUDA parity and throughput measurements.
 
 No-match/full-budget cases are the most useful for raw throughput. Early-hit
 cases are still valuable because they catch overhead, result handling, and
@@ -236,8 +277,8 @@ skip    ...
 For `compare` rows, the `impl` column carries the row status (`ok`,
 `below-target`, or `informational`). The relation is stored in the `result`
 field as semicolon-delimited details such as `ratio`, `target_ratio`, `strict`,
-`lhs`, `rhs`, `lhs_sps`, `rhs_sps`, `lhs_ms`, `rhs_ms`, `lhs_result`, and
-`rhs_result`.
+`ratio_basis`, `lhs`, `rhs`, `lhs_sps`, `rhs_sps`, `lhs_mean_ms`,
+`rhs_mean_ms`, `lhs_p50_ms`, `rhs_p50_ms`, `lhs_result`, and `rhs_result`.
 
 ## Original Brainstorm Baseline
 
@@ -276,6 +317,7 @@ These are measured policies, not general abstractions. Keep the independent
 | Seed progression | Fuse sequential seed increment and hash update, but keep arbitrary-ID construction normalized and independently tested. | Carry, growth, wrap, cache-validity, and earliest-result proofs. |
 | Predicate order | Order independent keyed checks by measured rejection cost; preserve source generation order when state or locks are shared. | Source-oracle windows and held-out controls, not one favorable fixture. |
 | Lua active loop | One synchronous batch per active `Game.update`; status text uses the native ref-backed text node. | In-game frame/cancellation evidence and the tracked lifecycle smoke. |
+| CUDA dispatch | Try CUDA only when the user enables it and the compiled filter is supported; otherwise use the Rust CPU path. | Exact CPU/GPU result and scanned-count parity across long, wraparound, and earliest-hit windows. |
 | Settings pips | Suppress only the unreadable 140-choice Joker and 36-choice face-count pip rows. | A supported native UI alternative or visual regression evidence. |
 
 Avoid repeating already falsified families without new evidence: blanket

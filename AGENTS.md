@@ -24,6 +24,9 @@ DLL named Immolate. Keep agent work source-faithful, scoped, and validated.
 - Mod metadata/compat: `lovely.toml`, `steamodded_compat.lua`.
 - Rust crate: `Immolate/`; implementation in `Immolate/src/`.
 - Benchmark catalog: `Immolate/src/bench_cases.rs`.
+- CUDA bridge/kernel: `Immolate/src/engine/cuda.rs` and
+  `Immolate/src/cuda/brainstorm_cuda.cu`; Rust CPU remains the correctness
+  oracle and fallback.
 - Rust DLL artifact: `target/rust/Immolate.dll`, staged as `Immolate.dll`.
 - Version source of truth: `[manifest].version` in `lovely.toml`; keep
   `steamodded_compat.lua`, `Immolate/Cargo.toml`, `Immolate/Cargo.lock`, and
@@ -57,6 +60,10 @@ DLL named Immolate. Keep agent work source-faithful, scoped, and validated.
   current and Original DLLs traverse seeds in different orders.
 - UX-fixture report: `mise run bench-ux` measures DLL calls using
   UI-reachable cases and `threads=0`; it is not an in-game Lua profiler.
+- Native-Windows CUDA parity/performance report from WSL:
+  `mise run bench-cuda-long-windows`.
+- Intentional CPU-only experimental build:
+  `BRAINSTORM_SKIP_CUDA_BUILD=1 mise run check`.
 - Native core benchmark:
   `cargo run --manifest-path Immolate/Cargo.toml --release --bin brainstorm_bench -- --case ux --budget 100000 --threads 0 --repeat 5 --warmup 2`.
 
@@ -90,6 +97,14 @@ DLL named Immolate. Keep agent work source-faithful, scoped, and validated.
   face samples after sampling; they are not replaced.
 - Rust search must preserve earliest matching seed semantics for single-thread
   and parallel searches.
+- CUDA is enabled only by the `AR: Use CUDA` setting through
+  `immolate_set_cuda_enabled`. Unsupported filters or an unavailable driver
+  must fall back to Rust CPU without changing result or scanned-count
+  semantics. Initialization and runtime failures latch that process onto CPU;
+  toggling the setting does not retry a failed device.
+- `immolate_last_search_used_cuda` is thread-local and must be queried
+  immediately after a search. It is true only when CUDA handles the remaining
+  search window; CPU prefix hits and every fallback path leave it false.
 
 ## Testing Expectations
 
@@ -104,6 +119,8 @@ DLL named Immolate. Keep agent work source-faithful, scoped, and validated.
   parity audits.
 - For Lua behavior, validate with `mise run lint-lua`; for full confidence run
   `mise run check`.
+- CUDA changes require CPU/GPU result and scanned-count parity, unsupported-path
+  fallback coverage, the CPU-only build, and native-Windows long-window tests.
 
 ## Style
 
@@ -147,6 +164,9 @@ DLL named Immolate. Keep agent work source-faithful, scoped, and validated.
   packaged metadata, and validate the workflow syntax. After publishing, verify
   the GitHub Actions run, **Latest** designation, versioned assets, downloaded
   checksum, and packaged `VERSION` from the remote release.
+- Do not publish a CUDA build until the release workflow provisions pinned
+  `nvcc` and host-compiler versions and intentionally packages its supported GPU
+  architectures. The experimental single-architecture module is branch-only.
 - Do not commit release payloads, generated zips, or staged DLLs. PRs should
   state validation run and whether binary artifacts changed. Attach UI
   screenshots for visual changes.

@@ -69,15 +69,27 @@ check_cmd luacheck
 check_cmd x86_64-w64-mingw32-gcc
 check_cmd x86_64-w64-mingw32-objdump
 check_cmd wine
+if [ "${BRAINSTORM_SKIP_CUDA_BUILD:-0}" = "1" ]; then
+  echo "skipped: nvcc (BRAINSTORM_SKIP_CUDA_BUILD=1)"
+else
+  check_cmd "${NVCC:-nvcc}"
+  check_cmd "${CUDAHOSTCXX:-gcc-12}"
+fi
 check_cmd file
 check_cmd sha256sum
 check_cmd zip
 check_cmd rsync
 
-if command -v wslpath >/dev/null && command -v cmd.exe >/dev/null; then
+powershell="${POWERSHELL_EXE:-powershell.exe}"
+if ! command -v "$powershell" >/dev/null; then
+  powershell="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+fi
+if command -v wslpath >/dev/null \
+  && command -v cmd.exe >/dev/null \
+  && command -v "$powershell" >/dev/null; then
   echo "ok: native Windows benchmark interop"
 else
-  echo "optional: wslpath/cmd.exe unavailable; use BENCH_EXECUTOR=wine for diagnostics"
+  echo "optional: wslpath/cmd.exe/powershell.exe unavailable; use BENCH_EXECUTOR=wine for diagnostics"
 fi
 
 rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
@@ -255,7 +267,7 @@ exports="$(
     sed -n '/^\[Ordinal\/Name Pointer\] Table/,/^$/p' |
     awk '/\[[[:space:]]*[0-9]+\]/{print $NF}'
 )"
-expected="$(printf '%s\n' brainstorm_search free_result immolate_set_log_path | sort)"
+expected="$(printf '%s\n' brainstorm_search free_result immolate_last_search_used_cuda immolate_set_cuda_enabled immolate_set_log_path | sort)"
 actual="$(printf '%s\n' "$exports" | sort)"
 if [ "$actual" != "$expected" ]; then
   echo "unexpected Rust DLL exports:"
@@ -291,6 +303,7 @@ bench_budget="${BENCH_BUDGET:-1000000}"
 bench_threads="${BENCH_THREADS:-0}"
 bench_repeat="${BENCH_REPEAT:-5}"
 bench_warmup="${BENCH_WARMUP:-1}"
+bench_cuda="${BENCH_CUDA:-default}"
 bench_format="${BENCH_FORMAT:-pretty}"
 bench_color="${BENCH_COLOR:-auto}"
 wine "$harness" bench \
@@ -300,12 +313,13 @@ wine "$harness" bench \
   --threads "$bench_threads" \
   --repeat "$bench_repeat" \
   --warmup "$bench_warmup" \
+  --cuda "$bench_cuda" \
   --format "$bench_format" \
   --color "$bench_color"
 '''
 
 [tasks.bench-compare]
-description = "Benchmark Rust against the Original Brainstorm DLL"
+description = "Benchmark Rust CPU/CUDA against the Original Brainstorm DLL"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -321,6 +335,7 @@ bench_budget="${BENCH_BUDGET:-1000000}"
 bench_threads="${BENCH_THREADS:-0}"
 bench_repeat="${BENCH_REPEAT:-5}"
 bench_warmup="${BENCH_WARMUP:-1}"
+bench_cuda="${BENCH_CUDA:-both}"
 bench_min_ratio="${BENCH_MIN_RATIO:-1.0}"
 bench_fail_on_mismatch="${BENCH_FAIL_ON_MISMATCH:-0}"
 bench_format="${BENCH_FORMAT:-pretty}"
@@ -339,10 +354,85 @@ wine "$harness" bench-compare \
   --threads "$bench_threads" \
   --repeat "$bench_repeat" \
   --warmup "$bench_warmup" \
+  --cuda "$bench_cuda" \
   --min-ratio "$bench_min_ratio" \
   --fail-on-mismatch "$bench_fail_on_mismatch" \
   --format "$bench_format" \
   --color "$bench_color"
+'''
+
+[tasks.bench-compare-windows]
+description = "Benchmark Rust CPU/CUDA against the Original DLL as a native Windows process"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+mise run build-rust
+mise run build-harness
+
+powershell="${POWERSHELL_EXE:-powershell.exe}"
+if ! command -v "$powershell" >/dev/null; then
+  powershell="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+fi
+command -v "$powershell" >/dev/null || {
+  echo "powershell.exe not found. Run from WSL with Windows interop enabled."
+  exit 1
+}
+
+rust_artifact="$TARGET_DIR/rust/$DLL"
+original_dll="${BENCH_ORIGINAL_DLL:-${ORIGINAL_DLL:-$IMMO_DIR/Immolate-OceanRamenandMathIsFun0.dll}}"
+rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
+harness="$IMMO_DIR/target/$rust_target/release/immolate_dll_harness.exe"
+
+[ -f "$original_dll" ] || { echo "original DLL not found: $original_dll"; exit 1; }
+
+export BS_HARNESS_WIN="$(wslpath -w "$(readlink -f "$harness")")"
+export BS_RUST_DLL_WIN="$(wslpath -w "$(readlink -f "$rust_artifact")")"
+export BS_ORIGINAL_DLL_WIN="$(wslpath -w "$(readlink -f "$original_dll")")"
+export BS_CASE="${BENCH_CASE:-all}"
+export BS_BUDGET="${BENCH_BUDGET:-1000000}"
+export BS_THREADS="${BENCH_THREADS:-0}"
+export BS_REPEAT="${BENCH_REPEAT:-5}"
+export BS_WARMUP="${BENCH_WARMUP:-1}"
+export BS_CUDA="${BENCH_CUDA:-both}"
+export BS_MIN_RATIO="${BENCH_MIN_RATIO:-1.0}"
+export BS_FAIL_ON_MISMATCH="${BENCH_FAIL_ON_MISMATCH:-0}"
+export BS_FORMAT="${BENCH_FORMAT:-pretty}"
+export BS_COLOR="${BENCH_COLOR:-auto}"
+export WSLENV="${WSLENV:+$WSLENV:}BS_HARNESS_WIN/w:BS_RUST_DLL_WIN/w:BS_ORIGINAL_DLL_WIN/w:BS_CASE/w:BS_BUDGET/w:BS_THREADS/w:BS_REPEAT/w:BS_WARMUP/w:BS_CUDA/w:BS_MIN_RATIO/w:BS_FAIL_ON_MISMATCH/w:BS_FORMAT/w:BS_COLOR/w"
+
+"$powershell" -NoProfile -ExecutionPolicy Bypass -Command '
+& $env:BS_HARNESS_WIN bench-compare `
+  --rust $env:BS_RUST_DLL_WIN `
+  --original $env:BS_ORIGINAL_DLL_WIN `
+  --case $env:BS_CASE `
+  --budget $env:BS_BUDGET `
+  --threads $env:BS_THREADS `
+  --repeat $env:BS_REPEAT `
+  --warmup $env:BS_WARMUP `
+  --cuda $env:BS_CUDA `
+  --min-ratio $env:BS_MIN_RATIO `
+  --fail-on-mismatch $env:BS_FAIL_ON_MISMATCH `
+  --format $env:BS_FORMAT `
+  --color $env:BS_COLOR
+'
+'''
+
+[tasks.bench-cuda-long-windows]
+description = "Native Windows long CUDA benchmark from WSL"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+BENCH_CASE="${BENCH_CASE:-cuda-long}" \
+BENCH_BUDGET="${BENCH_BUDGET:-25000000}" \
+BENCH_REPEAT="${BENCH_REPEAT:-3}" \
+BENCH_WARMUP="${BENCH_WARMUP:-1}" \
+BENCH_THREADS="${BENCH_THREADS:-0}" \
+BENCH_CUDA="${BENCH_CUDA:-both}" \
+BENCH_FORMAT="${BENCH_FORMAT:-pretty}" \
+BENCH_COLOR="${BENCH_COLOR:-never}" \
+BENCH_MIN_RATIO="${BENCH_MIN_RATIO:-0.0}" \
+BENCH_FAIL_ON_MISMATCH="${BENCH_FAIL_ON_MISMATCH:-0}" \
+mise run bench-compare-windows
 '''
 
 [tasks.bench-current-compare]
@@ -417,6 +507,7 @@ BENCH_BUDGET=100000 \
 BENCH_REPEAT=5 \
 BENCH_WARMUP=2 \
 BENCH_THREADS=0 \
+BENCH_CUDA=both \
 BENCH_FORMAT=tsv \
 BENCH_COLOR=never \
 BENCH_MIN_RATIO=1.0 \
@@ -433,6 +524,7 @@ BENCH_BUDGET=100000 \
 BENCH_REPEAT=5 \
 BENCH_WARMUP=2 \
 BENCH_THREADS=0 \
+BENCH_CUDA=both \
 BENCH_FORMAT=tsv \
 BENCH_COLOR=never \
 BENCH_MIN_RATIO=1.0 \
@@ -449,6 +541,7 @@ BENCH_BUDGET=1000000 \
 BENCH_REPEAT=7 \
 BENCH_WARMUP=2 \
 BENCH_THREADS=0 \
+BENCH_CUDA=both \
 BENCH_FORMAT=pretty \
 BENCH_COLOR=always \
 BENCH_MIN_RATIO=1.0 \
@@ -483,6 +576,7 @@ smoke_bench() {
     --threads "${BENCH_THREADS:-0}" \
     --repeat 1 \
     --warmup "${BENCH_WARMUP:-1}" \
+    --cuda both \
     --format "${BENCH_FORMAT:-pretty}" \
     --color "${BENCH_COLOR:-auto}"
 }

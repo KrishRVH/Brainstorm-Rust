@@ -6,6 +6,7 @@ use std::os::raw::{c_char, c_double, c_int, c_longlong};
 use std::ptr;
 
 use crate::brainstorm_search_core;
+use crate::engine::cuda;
 use crate::filters::FilterConfig;
 
 /// Searches for the earliest matching seed.
@@ -35,6 +36,7 @@ pub(crate) unsafe extern "C" fn brainstorm_search(
     num_seeds: c_longlong,
     threads: c_int,
 ) -> *mut c_char {
+    cuda::reset_last_search_used();
     let search = || {
         // SAFETY: the caller upholds every input pointer's validity for this call.
         let (
@@ -135,6 +137,16 @@ fn brainstorm_search_impl(
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn immolate_set_log_path(_path: *const c_char) {}
 
+#[unsafe(no_mangle)]
+pub(crate) extern "C" fn immolate_set_cuda_enabled(enabled: bool) {
+    cuda::set_cuda_enabled(enabled);
+}
+
+#[unsafe(no_mangle)]
+pub(crate) extern "C" fn immolate_last_search_used_cuda() -> bool {
+    cuda::last_search_used()
+}
+
 /// Releases a result returned by [`brainstorm_search`].
 ///
 /// # Safety
@@ -188,5 +200,16 @@ mod tests {
         // SAFETY: the static C literal remains valid and immutable.
         let value = unsafe { c_string_lossy(c"K\xff".as_ptr()) };
         assert!(matches!(value, Cow::Owned(value) if value == "K\u{fffd}"));
+    }
+
+    #[test]
+    fn cuda_status_export_reports_the_current_threads_marker() {
+        cuda::reset_last_search_used();
+        assert!(!immolate_last_search_used_cuda());
+
+        cuda::mark_last_search_used();
+        assert!(immolate_last_search_used_cuda());
+
+        cuda::reset_last_search_used();
     }
 }

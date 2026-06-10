@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::thread;
 
 use crate::engine::config::{CompiledFilter, KernelShape};
+use crate::engine::cuda::{CudaSearch, mark_last_search_used, reset_last_search_used, search_cuda};
 use crate::engine::kernels::apply_compiled_filter;
 use crate::engine::seed::SearchState;
 use crate::filters::FilterConfig;
@@ -14,6 +15,7 @@ pub fn brainstorm_search_core(
     num_seeds: i64,
     threads: i32,
 ) -> Option<String> {
+    reset_last_search_used();
     let budget = resolve_seed_budget(num_seeds);
     let compiled = CompiledFilter::compile(cfg);
     search_filters(seed_start, compiled, budget, threads)
@@ -49,9 +51,6 @@ fn search_filters(
     if cfg.shape == KernelShape::NoFilter {
         return Some(Seed::from_id(start_seed).to_string());
     }
-    if requested_threads == 1 {
-        return search_block(start_seed, num_seeds, &cfg);
-    }
     let prefix_count = cfg.serial_prefix_size().min(num_seeds);
     if let Some(seed) = search_block(start_seed, prefix_count, &cfg) {
         return Some(seed);
@@ -61,6 +60,10 @@ fn search_filters(
     }
     let remaining_start = (start_seed + prefix_count).rem_euclid(SEED_SPACE);
     let remaining = num_seeds - prefix_count;
+    if let CudaSearch::Complete(result) = search_cuda(remaining_start, &cfg, remaining) {
+        mark_last_search_used();
+        return result;
+    }
     let thread_count = resolve_threads_for_engine(
         remaining,
         requested_threads,

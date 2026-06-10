@@ -33,7 +33,7 @@ fn main() {
     let args = parse_args().unwrap_or_else(|message| {
         eprintln!("{message}");
         eprintln!(
-            "usage: brainstorm_bench [--case all|GROUP|NAME] [--budget N] [--threads N] [--repeat N] [--warmup N]"
+            "usage: brainstorm_bench [--case all|cuda-long|GROUP|NAME] [--budget N] [--threads N] [--repeat N] [--warmup N]"
         );
         process::exit(2);
     });

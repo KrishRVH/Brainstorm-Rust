@@ -2,6 +2,10 @@
 
 Current release: **v3.6**.
 
+The `v4-cuda` branch is an unreleased experiment. It keeps the Rust CPU engine
+as the correctness fallback and adds an explicit, user-controlled CUDA path for
+supported searches.
+
 **Just want to install it?** Open this repository's **Releases** page, select
 the release marked **Latest**, download the Brainstorm Supercharged zip, and
 follow the installation guide written in that release.
@@ -75,6 +79,9 @@ This project is licensed under CC BY-NC-SA 4.0.
 - Rust benchmark harness compares current speed against the Original Brainstorm
   DLL where the older ABI supports the same fixture, and reports comparable
   result mismatches.
+- Optional CUDA acceleration for supported filters, controlled only by the
+  `AR: Use CUDA` setting; unavailable or unsupported GPU searches fall back to
+  the Rust CPU engine.
 - Production release automation publishes immutable versioned releases and
   marks the newest one as **Latest**.
 
@@ -92,8 +99,16 @@ This project is licensed under CC BY-NC-SA 4.0.
 
 - MinGW-w64 and Wine are required for Windows DLL builds, DLL validation, and
   benchmarks.
-- WSL interoperability (`wslpath` and `cmd.exe`) is required for the
-  native-Windows current/current regression gate.
+- WSL interoperability (`wslpath`, `cmd.exe`, and `powershell.exe`) is required
+  for the native-Windows regression and CUDA benchmark gates.
+- CUDA Toolkit with `nvcc` is required for a GPU-enabled experimental build.
+  Set `BRAINSTORM_SKIP_CUDA_BUILD=1` only when intentionally validating its CPU
+  fallback. The experiment defaults to `sm_89` and `gcc-12`; override
+  `CUDAHOSTCXX` or `NVCC` for another toolchain. Each build embeds one
+  precompiled GPU architecture: set `BRAINSTORM_CUDA_ARCH` to your GPU's `sm_*`
+  architecture before building. A driver that cannot load it falls back to
+  Rust CPU. CUDA initialization and runtime failures stay on CPU for the rest
+  of that game process; restart Balatro to retry the GPU.
 - Write access to `%AppData%\Roaming\Balatro\Mods`.
 
 ## Build & Deploy (from source)
@@ -143,6 +158,13 @@ For native Linux-side Rust profiling without the Windows DLL ABI, use
 `brainstorm_bench` as described in `Immolate/BENCH.md`.
 
 See `Immolate/BENCH.md` for benchmark workflows.
+
+The closest benchmark to the in-game CUDA path runs the Windows DLL and driver
+natively from WSL:
+
+```bash
+mise run bench-cuda-long-windows
+```
 
 ## Versioning & Release
 
@@ -207,13 +229,15 @@ not part of the release payload.
 - Open settings: Ctrl+T. Toggle auto-reroll: Ctrl+A. Manual reroll: Ctrl+R.
 - Save/load state: Z/X + 1-5.
 - Configure filters: dual tags, voucher, pack (two shop slots), Joker
-  (searchable list + location), souls, observatory, Perkeo.
+  (searchable list + location), one Soul, Observatory, Perkeo.
 - Impossible first-shop Joker targets are hidden from the Joker selector, and
   impossible native filter combinations return no match immediately.
 - Configure Erratic Deck filters when searching for opening hands by face-card
   count, no faces, or suit concentration.
 - Use "Enable Brainstorm Supercharged" to disable runtime actions without
   losing settings.
+- `AR: Use CUDA` enables the experimental GPU path by default on this branch;
+  turn it off to force Rust CPU.
 - Use "Reset All" in the Brainstorm Supercharged tab to restore filter and
   Erratic deck settings to defaults.
 
@@ -222,3 +246,5 @@ not part of the release payload.
 - Missing DLL or wrong build: rerun `mise run build` and
   `mise run deploy`. If auto-detection fails, set `TARGET` to the full
   `.../Balatro/Mods/Brainstorm` path.
+- Experimental branch Lua must use the DLL built from the same branch; the
+  v3.6 release DLL does not provide the CUDA control ABI.

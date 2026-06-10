@@ -7,6 +7,9 @@ fn main() {
 }
 
 #[cfg(any(windows, test))]
+use std::time::Duration;
+
+#[cfg(any(windows, test))]
 const LEGACY_SEED_SPACE: i64 = 2_318_107_019_761;
 
 #[cfg(any(windows, test))]
@@ -100,11 +103,99 @@ fn validate_min_ratio(min_ratio: f64) -> Result<(), &'static str> {
     }
 }
 
+#[cfg(any(windows, test))]
+fn duration_ratio(numerator: Duration, denominator: Duration) -> f64 {
+    if numerator.is_zero() && denominator.is_zero() {
+        1.0
+    } else {
+        numerator.as_secs_f64() / denominator.as_secs_f64()
+    }
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CudaBenchMode {
+    Default,
+    Off,
+    Both,
+}
+
+#[cfg(any(windows, test))]
+fn parse_cuda_bench_mode(value: &str) -> Result<CudaBenchMode, String> {
+    match value {
+        "default" => Ok(CudaBenchMode::Default),
+        "off" => Ok(CudaBenchMode::Off),
+        "both" => Ok(CudaBenchMode::Both),
+        _ => Err(format!("invalid --cuda: {value}")),
+    }
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BenchArm {
+    Cpu,
+    Cuda,
+}
+
+#[cfg(any(windows, test))]
+fn paired_order(index: usize) -> [BenchArm; 2] {
+    if index.is_multiple_of(2) {
+        [BenchArm::Cpu, BenchArm::Cuda]
+    } else {
+        [BenchArm::Cuda, BenchArm::Cpu]
+    }
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BackendExpectation {
+    Cpu,
+    Cuda,
+    Either,
+}
+
+#[cfg(any(windows, test))]
+fn attest_backend(
+    expectation: BackendExpectation,
+    used_cuda: Option<bool>,
+) -> Result<bool, &'static str> {
+    let used_cuda = used_cuda.ok_or("DLL does not export immolate_last_search_used_cuda")?;
+    match (expectation, used_cuda) {
+        (BackendExpectation::Cpu, true) => Err("CPU arm used CUDA"),
+        (BackendExpectation::Cuda, false) => Err("CUDA arm fell back to CPU"),
+        _ => Ok(used_cuda),
+    }
+}
+
+#[cfg(any(windows, test))]
+fn observe_backend(observed: &mut Option<bool>, used_cuda: bool) -> Result<(), &'static str> {
+    if observed.is_some_and(|previous| previous != used_cuda) {
+        Err("CUDA-enabled arm changed backend")
+    } else {
+        *observed = Some(used_cuda);
+        Ok(())
+    }
+}
+
+#[cfg(any(windows, test))]
+fn cuda_results_match(
+    cpu_result: &str,
+    cpu_scanned: i64,
+    cuda_result: &str,
+    cuda_scanned: i64,
+) -> bool {
+    cpu_result == cuda_result && cpu_scanned == cuda_scanned
+}
+
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::{
-        LEGACY_SEED_SPACE, LegacyProbe, classify_legacy_probe, is_strict_legacy_comparison,
-        legacy_empty_proves_mismatch, legacy_seed_id, legacy_seed_scan_count,
+        BackendExpectation, BenchArm, CudaBenchMode, LEGACY_SEED_SPACE, LegacyProbe,
+        attest_backend, classify_legacy_probe, cuda_results_match, duration_ratio,
+        is_strict_legacy_comparison, legacy_empty_proves_mismatch, legacy_seed_id,
+        legacy_seed_scan_count, observe_backend, paired_order, parse_cuda_bench_mode,
         requires_strict_legacy_fixture, validate_min_ratio,
     };
 
@@ -185,6 +276,61 @@ mod tests {
         assert!(validate_min_ratio(f64::INFINITY).is_err());
         assert!(validate_min_ratio(f64::NEG_INFINITY).is_err());
     }
+
+    #[test]
+    fn zero_duration_ratios_remain_defined() {
+        assert_eq!(duration_ratio(Duration::ZERO, Duration::ZERO), 1.0);
+        assert_eq!(duration_ratio(Duration::ZERO, Duration::from_nanos(1)), 0.0);
+        assert!(duration_ratio(Duration::from_nanos(1), Duration::ZERO).is_infinite());
+    }
+
+    #[test]
+    fn cuda_modes_have_no_unpaired_or_alias_forms() {
+        assert_eq!(parse_cuda_bench_mode("default"), Ok(CudaBenchMode::Default));
+        assert_eq!(parse_cuda_bench_mode("off"), Ok(CudaBenchMode::Off));
+        assert_eq!(parse_cuda_bench_mode("both"), Ok(CudaBenchMode::Both));
+        for rejected in ["on", "cpu", "cuda"] {
+            assert!(parse_cuda_bench_mode(rejected).is_err());
+        }
+    }
+
+    #[test]
+    fn paired_schedule_counterbalances_adjacent_samples() {
+        assert_eq!(paired_order(0), [BenchArm::Cpu, BenchArm::Cuda]);
+        assert_eq!(paired_order(1), [BenchArm::Cuda, BenchArm::Cpu]);
+        assert_eq!(paired_order(2), paired_order(0));
+    }
+
+    #[test]
+    fn backend_attestation_rejects_missing_wrong_and_changing_backends() {
+        assert_eq!(
+            attest_backend(BackendExpectation::Cpu, Some(false)),
+            Ok(false)
+        );
+        assert_eq!(
+            attest_backend(BackendExpectation::Cuda, Some(true)),
+            Ok(true)
+        );
+        assert_eq!(
+            attest_backend(BackendExpectation::Either, Some(false)),
+            Ok(false)
+        );
+        assert!(attest_backend(BackendExpectation::Cpu, Some(true)).is_err());
+        assert!(attest_backend(BackendExpectation::Cuda, Some(false)).is_err());
+        assert!(attest_backend(BackendExpectation::Either, None).is_err());
+
+        let mut observed = None;
+        assert_eq!(observe_backend(&mut observed, true), Ok(()));
+        assert_eq!(observe_backend(&mut observed, true), Ok(()));
+        assert!(observe_backend(&mut observed, false).is_err());
+    }
+
+    #[test]
+    fn cuda_parity_covers_result_and_scanned_count() {
+        assert!(cuda_results_match("ABC", 42, "ABC", 42));
+        assert!(!cuda_results_match("ABC", 42, "DEF", 42));
+        assert!(!cuda_results_match("ABC", 42, "ABC", 43));
+    }
 }
 
 #[cfg(windows)]
@@ -211,9 +357,10 @@ mod windows_harness {
 
     use super::bench_cases::{self as bench, BenchCase, BenchGroup, BenchShape};
     use super::{
-        LegacyProbe, classify_legacy_probe, is_strict_legacy_comparison,
-        legacy_empty_proves_mismatch, legacy_seed_scan_count, requires_strict_legacy_fixture,
-        validate_min_ratio,
+        BackendExpectation, BenchArm, CudaBenchMode, LegacyProbe, attest_backend,
+        classify_legacy_probe, cuda_results_match, duration_ratio, is_strict_legacy_comparison,
+        legacy_empty_proves_mismatch, legacy_seed_scan_count, observe_backend, paired_order,
+        parse_cuda_bench_mode, requires_strict_legacy_fixture, validate_min_ratio,
     };
 
     type HModule = *mut c_void;
@@ -247,6 +394,8 @@ mod windows_harness {
         bool,
     ) -> *const c_char;
     type FreeResult = unsafe extern "C" fn(*mut c_char);
+    type SetCudaEnabled = unsafe extern "C" fn(bool);
+    type LastSearchUsedCuda = unsafe extern "C" fn() -> bool;
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -313,11 +462,14 @@ mod windows_harness {
         handle: HModule,
         entry: DllEntry,
         free_result: FreeResult,
+        set_cuda_enabled: Option<SetCudaEnabled>,
+        last_search_used_cuda: Option<LastSearchUsedCuda>,
     }
 
     struct DllRun {
         result: Option<String>,
         elapsed: Duration,
+        used_cuda: Option<bool>,
     }
 
     enum DllEntry {
@@ -338,10 +490,11 @@ mod windows_harness {
                 return Err(format!("failed to load DLL: {path}"));
             }
 
-            let search_name = CString::new("brainstorm_search").map_err(|err| format!("{err}"))?;
-            let free_name = CString::new("free_result").map_err(|err| format!("{err}"))?;
-            let search_ptr = unsafe { GetProcAddress(handle, search_name.as_ptr()) };
-            let free_ptr = unsafe { GetProcAddress(handle, free_name.as_ptr()) };
+            let search_ptr = unsafe { GetProcAddress(handle, c"brainstorm_search".as_ptr()) };
+            let free_ptr = unsafe { GetProcAddress(handle, c"free_result".as_ptr()) };
+            let cuda_ptr = unsafe { GetProcAddress(handle, c"immolate_set_cuda_enabled".as_ptr()) };
+            let cuda_status_ptr =
+                unsafe { GetProcAddress(handle, c"immolate_last_search_used_cuda".as_ptr()) };
             if search_ptr.is_null() || free_ptr.is_null() {
                 unsafe {
                     FreeLibrary(handle);
@@ -357,7 +510,22 @@ mod windows_harness {
                     std::mem::transmute::<FarProc, BrainstormSearch>(search_ptr)
                 }),
                 free_result: unsafe { std::mem::transmute::<FarProc, FreeResult>(free_ptr) },
+                set_cuda_enabled: (!cuda_ptr.is_null())
+                    .then(|| unsafe { std::mem::transmute::<FarProc, SetCudaEnabled>(cuda_ptr) }),
+                last_search_used_cuda: (!cuda_status_ptr.is_null()).then(|| unsafe {
+                    std::mem::transmute::<FarProc, LastSearchUsedCuda>(cuda_status_ptr)
+                }),
             })
+        }
+
+        fn set_cuda_enabled(&self, enabled: bool) -> Result<(), String> {
+            let Some(set_cuda_enabled) = self.set_cuda_enabled else {
+                return Err("DLL does not export immolate_set_cuda_enabled".to_owned());
+            };
+            unsafe {
+                set_cuda_enabled(enabled);
+            }
+            Ok(())
         }
 
         fn run(&self, case: &Case) -> Result<DllRun, String> {
@@ -397,10 +565,8 @@ mod windows_harness {
                 return Err(format!("failed to load original DLL: {path}"));
             }
 
-            let search_name = CString::new("brainstorm").map_err(|err| format!("{err}"))?;
-            let free_name = CString::new("free_result").map_err(|err| format!("{err}"))?;
-            let search_ptr = unsafe { GetProcAddress(handle, search_name.as_ptr()) };
-            let free_ptr = unsafe { GetProcAddress(handle, free_name.as_ptr()) };
+            let search_ptr = unsafe { GetProcAddress(handle, c"brainstorm".as_ptr()) };
+            let free_ptr = unsafe { GetProcAddress(handle, c"free_result".as_ptr()) };
             if search_ptr.is_null() || free_ptr.is_null() {
                 unsafe {
                     FreeLibrary(handle);
@@ -416,6 +582,8 @@ mod windows_harness {
                     std::mem::transmute::<FarProc, OriginalBrainstorm>(search_ptr)
                 }),
                 free_result: unsafe { std::mem::transmute::<FarProc, FreeResult>(free_ptr) },
+                set_cuda_enabled: None,
+                last_search_used_cuda: None,
             })
         }
 
@@ -463,7 +631,12 @@ mod windows_harness {
                 Some(out)
             };
             let elapsed = started.elapsed();
-            Ok(DllRun { result, elapsed })
+            let used_cuda = self.last_search_used_cuda.map(|status| unsafe { status() });
+            Ok(DllRun {
+                result,
+                elapsed,
+                used_cuda,
+            })
         }
 
         fn run_original(&self, case: &Case, search: OriginalBrainstorm) -> Result<DllRun, String> {
@@ -497,7 +670,11 @@ mod windows_harness {
                 Some(out)
             };
             let elapsed = started.elapsed();
-            Ok(DllRun { result, elapsed })
+            Ok(DllRun {
+                result,
+                elapsed,
+                used_cuda: None,
+            })
         }
     }
 
@@ -680,6 +857,7 @@ mod windows_harness {
             threads: i32,
             repeat: usize,
             warmup: usize,
+            cuda: CudaBenchMode,
             output: OutputOptions,
         },
         BenchCompare {
@@ -690,6 +868,7 @@ mod windows_harness {
             threads: i32,
             repeat: usize,
             warmup: usize,
+            cuda: CudaBenchMode,
             min_ratio: f64,
             fail_on_mismatch: bool,
             output: OutputOptions,
@@ -705,6 +884,7 @@ mod windows_harness {
                 threads,
                 repeat,
                 warmup,
+                cuda,
                 output,
             }) => {
                 let settings = BenchSettings {
@@ -715,7 +895,7 @@ mod windows_harness {
                     warmup,
                     output,
                 };
-                if let Err(err) = bench(&dll, settings) {
+                if let Err(err) = bench(&dll, settings, cuda) {
                     eprintln!("{err}");
                     std::process::exit(1);
                 }
@@ -728,6 +908,7 @@ mod windows_harness {
                 threads,
                 repeat,
                 warmup,
+                cuda,
                 min_ratio,
                 fail_on_mismatch,
                 output,
@@ -740,9 +921,14 @@ mod windows_harness {
                     warmup,
                     output,
                 };
-                if let Err(err) =
-                    bench_compare(&rust, &original, settings, min_ratio, fail_on_mismatch)
-                {
+                if let Err(err) = bench_compare(
+                    &rust,
+                    &original,
+                    settings,
+                    cuda,
+                    min_ratio,
+                    fail_on_mismatch,
+                ) {
                     eprintln!("{err}");
                     std::process::exit(1);
                 }
@@ -750,14 +936,18 @@ mod windows_harness {
             Err(err) => {
                 eprintln!("{err}");
                 eprintln!(
-                    "usage:\n  immolate_dll_harness bench --dll PATH [--case all|GROUP|NAME] [--budget N] [--threads N] [--repeat N] [--warmup N] [--format pretty|tsv] [--color auto|always|never]\n  immolate_dll_harness bench-compare --rust PATH --original PATH [--case all|GROUP|NAME] [--budget N] [--threads N] [--repeat N] [--warmup N] [--min-ratio N] [--fail-on-mismatch true|false] [--format pretty|tsv] [--color auto|always|never]"
+                    "usage:\n  immolate_dll_harness bench --dll PATH [--case all|cuda-long|GROUP|NAME] [--budget N] [--threads N] [--repeat N] [--warmup N] [--cuda default|off|both] [--format pretty|tsv] [--color auto|always|never]\n  immolate_dll_harness bench-compare --rust PATH --original PATH [--case all|cuda-long|GROUP|NAME] [--budget N] [--threads N] [--repeat N] [--warmup N] [--cuda default|off|both] [--min-ratio N] [--fail-on-mismatch true|false] [--format pretty|tsv] [--color auto|always|never]"
                 );
                 std::process::exit(2);
             },
         }
     }
 
-    fn bench(dll_path: &str, settings: BenchSettings<'_>) -> Result<(), String> {
+    fn bench(
+        dll_path: &str,
+        settings: BenchSettings<'_>,
+        cuda: CudaBenchMode,
+    ) -> Result<(), String> {
         if settings.budget <= 0 {
             return Err("--budget must be positive".to_owned());
         }
@@ -778,16 +968,26 @@ mod windows_harness {
             );
         }
 
-        let mut summaries = Vec::with_capacity(cases.len());
+        let mut summaries = Vec::with_capacity(cases.len() * 2);
         for case in &cases {
-            summaries.push(measure_bench_case(
-                &dll,
-                case,
-                settings.repeat,
-                settings.warmup,
-                "dll",
-                settings.output,
-            )?);
+            match cuda {
+                CudaBenchMode::Default => {
+                    summaries.push(measure_bench_case(&dll, case, settings, "dll", None, None)?);
+                },
+                CudaBenchMode::Off => summaries.push(measure_bench_case(
+                    &dll,
+                    case,
+                    settings,
+                    "rust-cpu",
+                    Some(false),
+                    Some(BackendExpectation::Cpu),
+                )?),
+                CudaBenchMode::Both => {
+                    let (cpu, cuda) = measure_cuda_pair(&dll, case, settings)?;
+                    summaries.push(cpu);
+                    summaries.push(cuda);
+                },
+            }
         }
         if settings.output.format == OutputFormat::Pretty {
             print_single_bench_report(&summaries, settings.output);
@@ -799,6 +999,7 @@ mod windows_harness {
         rust_path: &str,
         original_path: &str,
         settings: BenchSettings<'_>,
+        cuda: CudaBenchMode,
         min_ratio: f64,
         fail_on_mismatch: bool,
     ) -> Result<(), String> {
@@ -826,25 +1027,27 @@ mod windows_harness {
         let mut failed = false;
         let mut comparisons = Vec::with_capacity(cases.len());
         for case in &cases {
-            let rust_probe = rust.run(case)?.result;
-            let rust_probe_scanned = rust.measured_scanned_count(case, rust_probe.as_deref())?;
-            let rust_probe_result = display_result(rust_probe.as_deref()).to_owned();
-            let rust_summary = measure_bench_case(
-                &rust,
-                case,
-                settings.repeat,
-                settings.warmup,
-                "rust",
-                settings.output,
-            )?;
-            if rust_summary.result != rust_probe_result
-                || rust_summary.scanned != rust_probe_scanned
-            {
-                return Err(format!(
-                    "Rust DLL changed result during {}: probe={rust_probe_result}/{rust_probe_scanned}, measured={}/{}",
-                    case.name, rust_summary.result, rust_summary.scanned,
-                ));
-            }
+            let (rust_summary, rust_cuda) = match cuda {
+                CudaBenchMode::Default => (
+                    measure_current_case(&rust, case, settings, "rust", None, None)?,
+                    None,
+                ),
+                CudaBenchMode::Off => (
+                    measure_current_case(
+                        &rust,
+                        case,
+                        settings,
+                        "rust-cpu",
+                        Some(false),
+                        Some(BackendExpectation::Cpu),
+                    )?,
+                    None,
+                ),
+                CudaBenchMode::Both => {
+                    let (cpu, cuda) = measure_cuda_pair(&rust, case, settings)?;
+                    (cpu, Some(cuda))
+                },
+            };
             let (original_summary, original_skip) = if let Some(reason) = original_skip_reason(case)
             {
                 (None, Some(reason))
@@ -870,14 +1073,8 @@ mod windows_harness {
                     LegacyProbe::Hit { scanned } => {
                         let probe_result =
                             probe_result.expect("non-empty legacy probe has a result");
-                        let summary = measure_bench_case(
-                            &original,
-                            case,
-                            settings.repeat,
-                            settings.warmup,
-                            "original",
-                            settings.output,
-                        )?;
+                        let summary =
+                            measure_bench_case(&original, case, settings, "original", None, None)?;
                         if summary.result != probe_result || summary.scanned != scanned {
                             return Err(format!(
                                 "legacy DLL changed result during {}: probe={probe_result}/{scanned}, measured={}/{}",
@@ -890,6 +1087,7 @@ mod windows_harness {
             };
             let comparison = BenchComparison {
                 rust: rust_summary,
+                rust_cuda,
                 original: original_summary,
                 original_skip,
             };
@@ -972,6 +1170,7 @@ mod windows_harness {
 
     struct BenchComparison {
         rust: BenchSummary,
+        rust_cuda: Option<BenchSummary>,
         original: Option<BenchSummary>,
         original_skip: Option<&'static str>,
     }
@@ -981,6 +1180,12 @@ mod windows_harness {
             self.original.as_ref().map(|original| {
                 original.mean_elapsed.as_secs_f64() / self.rust.mean_elapsed.as_secs_f64()
             })
+        }
+
+        fn cuda_vs_cpu_ratio(&self) -> Option<f64> {
+            self.rust_cuda
+                .as_ref()
+                .map(|cuda| duration_ratio(self.rust.p50_elapsed, cuda.p50_elapsed))
         }
 
         fn is_strictly_comparable(&self) -> bool {
@@ -1009,58 +1214,254 @@ mod windows_harness {
         }
     }
 
+    fn ensure_cuda_parity(
+        case_name: &str,
+        cpu: &BenchSummary,
+        cuda: &BenchSummary,
+    ) -> Result<(), String> {
+        if cuda_results_match(&cpu.result, cpu.scanned, &cuda.result, cuda.scanned) {
+            Ok(())
+        } else {
+            Err(format!(
+                "CUDA parity mismatch in {case_name}: cpu={}/{}, cuda={}/{}",
+                cpu.result, cpu.scanned, cuda.result, cuda.scanned,
+            ))
+        }
+    }
+
+    fn measure_current_case(
+        dll: &Dll,
+        case: &Case,
+        settings: BenchSettings<'_>,
+        implementation: &'static str,
+        cuda_enabled: Option<bool>,
+        backend_expectation: Option<BackendExpectation>,
+    ) -> Result<BenchSummary, String> {
+        if let Some(enabled) = cuda_enabled {
+            dll.set_cuda_enabled(enabled)?;
+        }
+        let (probe, _) = run_bench_sample(dll, case, 0, implementation, backend_expectation)?;
+        let summary = measure_bench_case(
+            dll,
+            case,
+            settings,
+            implementation,
+            cuda_enabled,
+            backend_expectation,
+        )?;
+        if summary.result != probe.result || summary.scanned != probe.scanned {
+            return Err(format!(
+                "Rust DLL changed result during {}: probe={}/{}, measured={}/{}",
+                case.name, probe.result, probe.scanned, summary.result, summary.scanned,
+            ));
+        }
+        Ok(summary)
+    }
+
     fn measure_bench_case(
         dll: &Dll,
         case: &Case,
-        repeat: usize,
-        warmup: usize,
+        settings: BenchSettings<'_>,
         implementation: &'static str,
-        output: OutputOptions,
+        cuda_enabled: Option<bool>,
+        backend_expectation: Option<BackendExpectation>,
     ) -> Result<BenchSummary, String> {
-        run_warmups(dll, case, warmup)?;
-        let mut runs: Vec<BenchRun> = Vec::with_capacity(repeat);
-        for run in 1..=repeat {
-            let DllRun { result, elapsed } = dll.run(case)?;
-            if case.compiled_no_match && result.is_some() {
+        if let Some(enabled) = cuda_enabled {
+            dll.set_cuda_enabled(enabled)?;
+        }
+        run_warmups(
+            dll,
+            case,
+            settings.warmup,
+            implementation,
+            backend_expectation,
+        )?;
+        let mut runs: Vec<BenchRun> = Vec::with_capacity(settings.repeat);
+        for run in 1..=settings.repeat {
+            let (bench_run, _) =
+                run_bench_sample(dll, case, run, implementation, backend_expectation)?;
+            if settings.output.format == OutputFormat::Tsv {
+                print_tsv_run(implementation, case, &bench_run);
+            }
+            push_consistent_run(&mut runs, bench_run, case, implementation)?;
+        }
+        summarize_bench_case(case, implementation, &runs, settings.output)
+    }
+
+    fn measure_cuda_pair(
+        dll: &Dll,
+        case: &Case,
+        settings: BenchSettings<'_>,
+    ) -> Result<(BenchSummary, BenchSummary), String> {
+        let cuda_expectation = if case.name.starts_with("cuda-long-") {
+            BackendExpectation::Cuda
+        } else {
+            BackendExpectation::Either
+        };
+        let final_phase = settings
+            .warmup
+            .checked_add(settings.repeat)
+            .ok_or_else(|| "--warmup plus --repeat is too large".to_owned())?;
+        let mut cpu_probe = None;
+        let mut cuda_probe = None;
+        let mut cpu_runs = Vec::with_capacity(settings.repeat);
+        let mut cuda_runs = Vec::with_capacity(settings.repeat);
+        let mut observed_cuda_backend = None;
+
+        for phase in 0..=final_phase {
+            let measured = phase > settings.warmup;
+            let run = phase.saturating_sub(settings.warmup);
+            let order = paired_order(if measured { run - 1 } else { phase });
+            for arm in order {
+                let (enabled, implementation, expectation) = match arm {
+                    BenchArm::Cpu => (false, "rust-cpu", BackendExpectation::Cpu),
+                    BenchArm::Cuda => (true, "rust-cuda-enabled", cuda_expectation),
+                };
+                dll.set_cuda_enabled(enabled)?;
+                let (bench_run, used_cuda) =
+                    run_bench_sample(dll, case, run, implementation, Some(expectation))?;
+
+                if arm == BenchArm::Cuda {
+                    observe_backend(
+                        &mut observed_cuda_backend,
+                        used_cuda.expect("attested backend is known"),
+                    )
+                    .map_err(|err| format!("{}: {err}", case.name))?;
+                    if phase == 0 && used_cuda == Some(true) {
+                        print_cuda_probe(case, &bench_run, settings.output);
+                    }
+                }
+
+                if phase == 0 {
+                    match arm {
+                        BenchArm::Cpu => cpu_probe = Some(bench_run),
+                        BenchArm::Cuda => cuda_probe = Some(bench_run),
+                    }
+                } else if measured {
+                    let implementation = match arm {
+                        BenchArm::Cpu => "rust-cpu",
+                        BenchArm::Cuda if observed_cuda_backend == Some(true) => "rust-cuda",
+                        BenchArm::Cuda => "rust-cuda-not-used",
+                    };
+                    if settings.output.format == OutputFormat::Tsv {
+                        print_tsv_run(implementation, case, &bench_run);
+                    }
+                    match arm {
+                        BenchArm::Cpu => {
+                            push_consistent_run(&mut cpu_runs, bench_run, case, implementation)?;
+                        },
+                        BenchArm::Cuda => {
+                            push_consistent_run(&mut cuda_runs, bench_run, case, implementation)?;
+                        },
+                    }
+                }
+            }
+        }
+
+        let cuda_implementation = if observed_cuda_backend == Some(true) {
+            "rust-cuda"
+        } else {
+            "rust-cuda-not-used"
+        };
+        let cpu = summarize_bench_case(case, "rust-cpu", &cpu_runs, settings.output)?;
+        let cuda = summarize_bench_case(case, cuda_implementation, &cuda_runs, settings.output)?;
+        for (implementation, probe, summary) in [
+            ("rust-cpu", cpu_probe.expect("paired probe"), &cpu),
+            (
+                cuda_implementation,
+                cuda_probe.expect("paired probe"),
+                &cuda,
+            ),
+        ] {
+            if probe.result != summary.result || probe.scanned != summary.scanned {
                 return Err(format!(
-                    "{} compiled to NoMatch but {implementation} returned a seed",
-                    case.name,
+                    "{} changed result during {implementation}: probe={}/{}, measured={}/{}",
+                    case.name, probe.result, probe.scanned, summary.result, summary.scanned,
                 ));
             }
-            let scanned = dll.measured_scanned_count(case, result.as_deref())?;
-            let elapsed_secs = elapsed.as_secs_f64();
-            let seeds_per_sec = if scanned > 0 && elapsed_secs > 0.0 {
-                scanned as f64 / elapsed_secs
-            } else {
-                0.0
-            };
-            let ns_per_seed = if scanned > 0 {
-                elapsed_secs * 1_000_000_000.0 / scanned as f64
-            } else {
-                0.0
-            };
-            let result = display_result(result.as_deref()).to_owned();
-            if let Some(first) = runs.first()
-                && (first.scanned != scanned || first.result != result)
-            {
-                return Err(format!(
-                    "{} changed result during {implementation}: first={}/{}, run {run}={result}/{scanned}",
-                    case.name, first.result, first.scanned,
-                ));
-            }
-            let bench_run = BenchRun {
+        }
+        ensure_cuda_parity(case.name, &cpu, &cuda)?;
+        Ok((cpu, cuda))
+    }
+
+    fn run_bench_sample(
+        dll: &Dll,
+        case: &Case,
+        run: usize,
+        implementation: &str,
+        backend_expectation: Option<BackendExpectation>,
+    ) -> Result<(BenchRun, Option<bool>), String> {
+        let DllRun {
+            result,
+            elapsed,
+            used_cuda,
+        } = dll.run(case)?;
+        let used_cuda = if let Some(expectation) = backend_expectation {
+            Some(
+                attest_backend(expectation, used_cuda)
+                    .map_err(|err| format!("{} {implementation}: {err}", case.name))?,
+            )
+        } else {
+            used_cuda
+        };
+        if case.compiled_no_match && result.is_some() {
+            return Err(format!(
+                "{} compiled to NoMatch but {implementation} returned a seed",
+                case.name,
+            ));
+        }
+        let scanned = dll.measured_scanned_count(case, result.as_deref())?;
+        let elapsed_secs = elapsed.as_secs_f64();
+        let seeds_per_sec = if scanned > 0 && elapsed_secs > 0.0 {
+            scanned as f64 / elapsed_secs
+        } else {
+            0.0
+        };
+        let ns_per_seed = if scanned > 0 {
+            elapsed_secs * 1_000_000_000.0 / scanned as f64
+        } else {
+            0.0
+        };
+        Ok((
+            BenchRun {
                 run,
                 elapsed,
                 scanned,
                 seeds_per_sec,
                 ns_per_seed,
-                result,
-            };
-            if output.format == OutputFormat::Tsv {
-                print_tsv_run(implementation, case, &bench_run);
-            }
-            runs.push(bench_run);
+                result: display_result(result.as_deref()).to_owned(),
+            },
+            used_cuda,
+        ))
+    }
+
+    fn push_consistent_run(
+        runs: &mut Vec<BenchRun>,
+        run: BenchRun,
+        case: &Case,
+        implementation: &str,
+    ) -> Result<(), String> {
+        if let Some(first) = runs.first()
+            && (first.scanned != run.scanned || first.result != run.result)
+        {
+            return Err(format!(
+                "{} changed result during {implementation}: first={}/{}, run {}={}/{}",
+                case.name, first.result, first.scanned, run.run, run.result, run.scanned,
+            ));
         }
+        runs.push(run);
+        Ok(())
+    }
+
+    fn summarize_bench_case(
+        case: &Case,
+        implementation: &'static str,
+        runs: &[BenchRun],
+        output: OutputOptions,
+    ) -> Result<BenchSummary, String> {
+        let Some(first) = runs.first() else {
+            return Err("--repeat must be positive".to_owned());
+        };
         let mut durations: Vec<_> = runs.iter().map(|run| run.elapsed).collect();
         durations.sort_by(compare_duration);
         let mean_elapsed = mean_duration(&durations);
@@ -1075,7 +1476,7 @@ mod windows_harness {
         } else {
             stdev_elapsed.as_secs_f64() / mean_elapsed.as_secs_f64()
         };
-        let scanned = runs[0].scanned;
+        let scanned = first.scanned;
         let scanned_f64 = scanned as f64;
         let seeds_per_sec = if scanned > 0 && !mean_elapsed.is_zero() {
             scanned_f64 / mean_elapsed.as_secs_f64()
@@ -1088,7 +1489,7 @@ mod windows_harness {
             0.0
         };
         let scanned_pct = scanned_f64 / case.num_seeds as f64;
-        let result = runs[0].result.clone();
+        let result = first.result.clone();
         let summary = BenchSummary {
             implementation,
             case_name: case.name,
@@ -1097,7 +1498,7 @@ mod windows_harness {
             note: case.note,
             budget: case.num_seeds,
             threads: case.threads,
-            repeat,
+            repeat: runs.len(),
             mean_elapsed,
             min_elapsed,
             max_elapsed,
@@ -1118,9 +1519,15 @@ mod windows_harness {
         Ok(summary)
     }
 
-    fn run_warmups(dll: &Dll, case: &Case, warmup: usize) -> Result<(), String> {
+    fn run_warmups(
+        dll: &Dll,
+        case: &Case,
+        warmup: usize,
+        implementation: &str,
+        backend_expectation: Option<BackendExpectation>,
+    ) -> Result<(), String> {
         for _ in 0..warmup {
-            dll.run(case)?;
+            run_bench_sample(dll, case, 0, implementation, backend_expectation)?;
         }
         Ok(())
     }
@@ -1137,6 +1544,7 @@ mod windows_harness {
                 let mut threads = 0;
                 let mut repeat = 5;
                 let mut warmup = 1;
+                let mut cuda = CudaBenchMode::Default;
                 let mut output = OutputOptions::default();
                 parse_flags(&args[1..], |flag, value| match flag {
                     "--dll" => {
@@ -1163,6 +1571,10 @@ mod windows_harness {
                         warmup = parse_value(value, "--warmup")?;
                         Ok(())
                     },
+                    "--cuda" => {
+                        cuda = parse_cuda_bench_mode(value)?;
+                        Ok(())
+                    },
                     "--format" => {
                         output.format = parse_output_format(value)?;
                         Ok(())
@@ -1180,6 +1592,7 @@ mod windows_harness {
                     threads,
                     repeat,
                     warmup,
+                    cuda,
                     output,
                 })
             },
@@ -1191,6 +1604,7 @@ mod windows_harness {
                 let mut threads = 0;
                 let mut repeat = 5;
                 let mut warmup = 1;
+                let mut cuda = CudaBenchMode::Both;
                 let mut min_ratio = 1.0;
                 let mut fail_on_mismatch = false;
                 let mut output = OutputOptions::default();
@@ -1223,6 +1637,10 @@ mod windows_harness {
                         warmup = parse_value(value, "--warmup")?;
                         Ok(())
                     },
+                    "--cuda" => {
+                        cuda = parse_cuda_bench_mode(value)?;
+                        Ok(())
+                    },
                     "--min-ratio" => {
                         min_ratio = parse_value(value, "--min-ratio")?;
                         Ok(())
@@ -1249,6 +1667,7 @@ mod windows_harness {
                     threads,
                     repeat,
                     warmup,
+                    cuda,
                     min_ratio,
                     fail_on_mismatch,
                     output,
@@ -1402,7 +1821,7 @@ mod windows_harness {
     }
 
     fn original_pack_name(key: &str) -> Result<&'static str, String> {
-        match normalize_original_pack_key(key).as_str() {
+        match normalize_original_pack_key(key) {
             "" => Ok(""),
             "p_arcana_normal" => Ok("Arcana Pack"),
             "p_arcana_jumbo" => Ok("Jumbo Arcana Pack"),
@@ -1423,14 +1842,14 @@ mod windows_harness {
         }
     }
 
-    fn normalize_original_pack_key(key: &str) -> String {
+    fn normalize_original_pack_key(key: &str) -> &str {
         let Some((prefix, suffix)) = key.rsplit_once('_') else {
-            return key.to_owned();
+            return key;
         };
         if suffix.chars().all(|ch| ch.is_ascii_digit()) {
-            prefix.to_owned()
+            prefix
         } else {
-            key.to_owned()
+            key
         }
     }
 
@@ -1529,7 +1948,8 @@ mod windows_harness {
         let color = output.use_color();
         print_section("Case Summary", color);
         println!(
-            "{:<18} {:<9} {:<6} {:>7} {:>11} {:>9} {:>9} {:>10} {:>7} {:<12}",
+            "{:<17} {:<18} {:<9} {:<6} {:>7} {:>11} {:>9} {:>9} {:>10} {:>7} {:<12}",
+            "impl",
             "case",
             "group",
             "shape",
@@ -1541,7 +1961,7 @@ mod windows_harness {
             "cv",
             "result",
         );
-        println!("{}", paint(color, ANSI_DIM, &"-".repeat(111)));
+        println!("{}", paint(color, ANSI_DIM, &"-".repeat(129)));
         for summary in summaries {
             let cv = format!("{:.1}%", summary.coefficient_variation * 100.0);
             let cv = paint(
@@ -1550,7 +1970,8 @@ mod windows_harness {
                 &format!("{cv:>7}"),
             );
             println!(
-                "{:<18} {:<9} {:<6} {:>7} {:>11} {:>9.3} {:>9.3} {:>10} {} {:<12}",
+                "{:<17} {:<18} {:<9} {:<6} {:>7} {:>11} {:>9.3} {:>9.3} {:>10} {} {:<12}",
+                summary.implementation,
                 summary.case_name,
                 summary.group.label(),
                 summary.shape.label(),
@@ -1658,9 +2079,55 @@ mod windows_harness {
                 );
             }
         }
+        print_cuda_report(comparisons, color);
         print_result_mismatch_report(comparisons, color);
         print_regression_report(comparisons, min_ratio, color);
         print_noise_report(comparisons, color);
+    }
+
+    fn print_cuda_report(comparisons: &[BenchComparison], color: bool) {
+        if !comparisons
+            .iter()
+            .any(|comparison| comparison.rust_cuda.is_some())
+        {
+            return;
+        }
+
+        print_section("CUDA-enabled vs CPU", color);
+        println!(
+            "{:<18} {:<12} {:>7} {:>11} {:>11} {:>11} {:>17} {:>11}",
+            "case", "backend", "scan", "cpu/s", "enabled/s", "p50 ratio", "p50 ms C/E", "cv C/E",
+        );
+        println!("{}", paint(color, ANSI_DIM, &"-".repeat(108)));
+        for comparison in comparisons {
+            let Some(cuda) = comparison.rust_cuda.as_ref() else {
+                continue;
+            };
+            let ratio = comparison
+                .cuda_vs_cpu_ratio()
+                .expect("CUDA comparison has a ratio");
+            println!(
+                "{:<18} {:<12} {:>7} {:>11} {:>11} {:>11} {:>17} {:>11}",
+                comparison.rust.case_name,
+                cuda.implementation
+                    .strip_prefix("rust-")
+                    .unwrap_or(cuda.implementation),
+                format!("{:.1}%", comparison.rust.scanned_pct * 100.0),
+                format_rate(comparison.rust.seeds_per_sec),
+                format_rate(cuda.seeds_per_sec),
+                paint(color, ratio_color(ratio, 1.0), &format!("{ratio:.3}x")),
+                format!(
+                    "{:.3}/{:.3}",
+                    ms(comparison.rust.p50_elapsed),
+                    ms(cuda.p50_elapsed)
+                ),
+                format!(
+                    "{:.1}/{:.1}%",
+                    comparison.rust.coefficient_variation * 100.0,
+                    cuda.coefficient_variation * 100.0,
+                ),
+            );
+        }
     }
 
     fn print_result_mismatch_report(comparisons: &[BenchComparison], color: bool) {
@@ -1750,6 +2217,10 @@ mod windows_harness {
             .filter(|comparison| {
                 comparison.rust.coefficient_variation > 0.05
                     || comparison
+                        .rust_cuda
+                        .as_ref()
+                        .is_some_and(|cuda| cuda.coefficient_variation > 0.05)
+                    || comparison
                         .original
                         .as_ref()
                         .is_some_and(|original| original.coefficient_variation > 0.05)
@@ -1760,20 +2231,43 @@ mod windows_harness {
         }
         print_section("High Variance", color);
         for comparison in noisy {
+            let cuda_cv = comparison.rust_cuda.as_ref().map_or_else(
+                || "n/a".to_owned(),
+                |cuda| format!("{:>5.1}%", cuda.coefficient_variation * 100.0),
+            );
             let original_cv = comparison.original.as_ref().map_or_else(
                 || "n/a".to_owned(),
                 |original| format!("{:>5.1}%", original.coefficient_variation * 100.0),
             );
             println!(
-                "  {:<18} rust cv {:>5.1}%   original cv {}   repeat or raise budget before trusting small deltas",
+                "  {:<18} cpu cv {:>5.1}%   enabled cv {}   original cv {}   repeat or raise budget before trusting small deltas",
                 comparison.rust.case_name,
                 comparison.rust.coefficient_variation * 100.0,
+                cuda_cv,
                 original_cv,
             );
         }
     }
 
     fn print_original_tsv_compare(comparison: &BenchComparison, min_ratio: f64) {
+        if let Some(cuda) = comparison.rust_cuda.as_ref() {
+            let relation = if cuda.implementation == "rust-cuda" {
+                "rust-cuda-vs-rust-cpu"
+            } else {
+                "rust-cuda-not-used-vs-rust-cpu"
+            };
+            print_tsv_ratio(
+                relation,
+                cuda,
+                &comparison.rust,
+                comparison
+                    .cuda_vs_cpu_ratio()
+                    .expect("CUDA comparison has a ratio"),
+                1.0,
+                false,
+                "p50",
+            );
+        }
         let Some(original) = &comparison.original else {
             if let Some(reason) = comparison.original_skip {
                 let fields = [
@@ -1812,6 +2306,7 @@ mod windows_harness {
                 .expect("original comparison has ratio"),
             min_ratio,
             comparison.is_strictly_comparable(),
+            "mean",
         );
     }
 
@@ -1844,6 +2339,18 @@ mod windows_harness {
             run.ns_per_seed,
             run.result,
         );
+    }
+
+    fn print_cuda_probe(case: &Case, run: &BenchRun, output: OutputOptions) {
+        if output.format == OutputFormat::Tsv {
+            print_tsv_run("rust-cuda-probe", case, run);
+        } else {
+            println!(
+                "CUDA probe: case={} elapsed_ms={:.3} (the process's first GPU probe includes lazy CUDA startup)",
+                case.name,
+                ms(run.elapsed),
+            );
+        }
     }
 
     fn print_tsv_summary(summary: &BenchSummary) {
@@ -1879,6 +2386,7 @@ mod windows_harness {
         ratio: f64,
         target_ratio: f64,
         strict: bool,
+        ratio_basis: &str,
     ) {
         let status = if !strict {
             "informational"
@@ -1888,7 +2396,7 @@ mod windows_harness {
             "below-target"
         };
         println!(
-            "compare\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{:.3}\t{:.0}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\tratio={:.3};target_ratio={:.3};strict={};lhs={};rhs={};lhs_sps={:.0};rhs_sps={:.0};lhs_ms={:.3};rhs_ms={:.3};lhs_result={};rhs_result={}",
+            "compare\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{:.3}\t{:.0}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\tratio={:.3};ratio_basis={};target_ratio={:.3};strict={};lhs={};rhs={};lhs_sps={:.0};rhs_sps={:.0};lhs_mean_ms={:.3};rhs_mean_ms={:.3};lhs_p50_ms={:.3};rhs_p50_ms={:.3};lhs_result={};rhs_result={}",
             status,
             lhs.case_name,
             lhs.group.key(),
@@ -1909,6 +2417,7 @@ mod windows_harness {
             ms(lhs.stdev_elapsed),
             lhs.coefficient_variation * 100.0,
             ratio,
+            ratio_basis,
             target_ratio,
             strict,
             relation.split("-vs-").next().unwrap_or(relation),
@@ -1917,6 +2426,8 @@ mod windows_harness {
             rhs.seeds_per_sec,
             ms(lhs.mean_elapsed),
             ms(rhs.mean_elapsed),
+            ms(lhs.p50_elapsed),
+            ms(rhs.p50_elapsed),
             lhs.result,
             rhs.result,
         );
