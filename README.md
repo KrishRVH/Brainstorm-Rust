@@ -58,7 +58,7 @@ This project is licensed under CC BY-NC-SA 4.0.
 - Enable toggle, save/load state (Z/X + 1-5), reroll hotkeys (Ctrl+R,
   Ctrl+A), settings UI (Ctrl+T).
 - Rust benchmark harness compares current speed against the Original Brainstorm
-  DLL where the older ABI supports the same fixture, and fails comparable
+  DLL where the older ABI supports the same fixture, and reports comparable
   result mismatches.
 - Production release automation publishes the `latest` release with a versioned
   title and versioned zip artifact.

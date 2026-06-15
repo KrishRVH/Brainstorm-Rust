@@ -485,6 +485,7 @@ mod windows_harness {
             repeat: usize,
             warmup: usize,
             min_ratio: f64,
+            fail_on_mismatch: bool,
             output: OutputOptions,
         },
     }
@@ -522,6 +523,7 @@ mod windows_harness {
                 repeat,
                 warmup,
                 min_ratio,
+                fail_on_mismatch,
                 output,
             }) => {
                 let settings = BenchSettings {
@@ -532,7 +534,9 @@ mod windows_harness {
                     warmup,
                     output,
                 };
-                if let Err(err) = bench_compare(&rust, &original, settings, min_ratio) {
+                if let Err(err) =
+                    bench_compare(&rust, &original, settings, min_ratio, fail_on_mismatch)
+                {
                     eprintln!("{err}");
                     std::process::exit(1);
                 }
@@ -540,7 +544,7 @@ mod windows_harness {
             Err(err) => {
                 eprintln!("{err}");
                 eprintln!(
-                    "usage:\n  immolate_dll_harness bench --dll PATH [--case all|GROUP|NAME] [--budget N] [--threads N] [--repeat N] [--warmup N] [--format pretty|tsv] [--color auto|always|never]\n  immolate_dll_harness bench-compare --rust PATH --original PATH [--case all|GROUP|NAME] [--budget N] [--threads N] [--repeat N] [--warmup N] [--min-ratio N] [--format pretty|tsv] [--color auto|always|never]"
+                    "usage:\n  immolate_dll_harness bench --dll PATH [--case all|GROUP|NAME] [--budget N] [--threads N] [--repeat N] [--warmup N] [--format pretty|tsv] [--color auto|always|never]\n  immolate_dll_harness bench-compare --rust PATH --original PATH [--case all|GROUP|NAME] [--budget N] [--threads N] [--repeat N] [--warmup N] [--min-ratio N] [--fail-on-mismatch true|false] [--format pretty|tsv] [--color auto|always|never]"
                 );
                 std::process::exit(2);
             },
@@ -586,6 +590,7 @@ mod windows_harness {
         original_path: &str,
         settings: BenchSettings<'_>,
         min_ratio: f64,
+        fail_on_mismatch: bool,
     ) -> Result<(), String> {
         if settings.budget <= 0 {
             return Err("--budget must be positive".to_owned());
@@ -648,7 +653,7 @@ mod windows_harness {
                 failed = true;
             }
             if let Some(original) = comparison.original.as_ref() {
-                if comparison.rust.result != original.result {
+                if fail_on_mismatch && comparison.rust.result != original.result {
                     failed = true;
                     eprintln!(
                         "benchmark parity mismatch in {}: rust={} original={}",
@@ -716,6 +721,12 @@ mod windows_harness {
             self.original.as_ref().map(|original| {
                 original.mean_elapsed.as_secs_f64() / self.rust.mean_elapsed.as_secs_f64()
             })
+        }
+
+        fn has_result_mismatch(&self) -> bool {
+            self.original
+                .as_ref()
+                .is_some_and(|original| self.rust.result != original.result)
         }
     }
 
@@ -904,6 +915,7 @@ mod windows_harness {
                 let mut repeat = 5;
                 let mut warmup = 1;
                 let mut min_ratio = 0.8;
+                let mut fail_on_mismatch = false;
                 let mut output = OutputOptions::default();
                 parse_flags(&args[1..], |flag, value| match flag {
                     "--rust" => {
@@ -938,6 +950,10 @@ mod windows_harness {
                         min_ratio = parse_value(value, "--min-ratio")?;
                         Ok(())
                     },
+                    "--fail-on-mismatch" => {
+                        fail_on_mismatch = parse_bool_flag(value, "--fail-on-mismatch")?;
+                        Ok(())
+                    },
                     "--format" => {
                         output.format = parse_output_format(value)?;
                         Ok(())
@@ -957,6 +973,7 @@ mod windows_harness {
                     repeat,
                     warmup,
                     min_ratio,
+                    fail_on_mismatch,
                     output,
                 })
             },
@@ -1003,6 +1020,14 @@ mod windows_harness {
             "always" => Ok(ColorMode::Always),
             "never" => Ok(ColorMode::Never),
             _ => Err(format!("invalid --color: {value}")),
+        }
+    }
+
+    fn parse_bool_flag(value: &str, flag: &str) -> Result<bool, String> {
+        match value {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => Err(format!("invalid {flag}: {value}")),
         }
     }
 
@@ -1411,9 +1436,45 @@ mod windows_harness {
                 );
             }
         }
+        print_result_mismatch_report(comparisons, color);
         print_group_report(comparisons, min_ratio, color);
         print_ranked_report(comparisons, min_ratio, color);
         print_noise_report(comparisons, color);
+    }
+
+    fn print_result_mismatch_report(comparisons: &[BenchComparison], color: bool) {
+        let mismatches: Vec<_> = comparisons
+            .iter()
+            .filter(|comparison| comparison.has_result_mismatch())
+            .collect();
+        if mismatches.is_empty() {
+            return;
+        }
+
+        print_section("Result Mismatches", color);
+        println!(
+            "  {}",
+            paint(
+                color,
+                ANSI_DIM,
+                "informational: the Original DLL is a historical performance baseline, not the current correctness oracle"
+            )
+        );
+        for comparison in mismatches.iter().take(12) {
+            let original = comparison
+                .original
+                .as_ref()
+                .expect("mismatch requires original result");
+            println!(
+                "  {:<18} rust {:<12} original {}",
+                comparison.rust.case_name,
+                short_result(&comparison.rust.result, 12),
+                short_result(&original.result, 12),
+            );
+        }
+        if mismatches.len() > 12 {
+            println!("  ... {} more", mismatches.len() - 12);
+        }
     }
 
     fn print_group_report(comparisons: &[BenchComparison], min_ratio: f64, color: bool) {

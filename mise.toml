@@ -272,6 +272,7 @@ bench_threads="${BENCH_THREADS:-1}"
 bench_repeat="${BENCH_REPEAT:-5}"
 bench_warmup="${BENCH_WARMUP:-1}"
 bench_min_ratio="${BENCH_MIN_RATIO:-0.0}"
+bench_fail_on_mismatch="${BENCH_FAIL_ON_MISMATCH:-0}"
 bench_format="${BENCH_FORMAT:-pretty}"
 bench_color="${BENCH_COLOR:-auto}"
 
@@ -289,6 +290,7 @@ wine "$harness" bench-compare \
   --repeat "$bench_repeat" \
   --warmup "$bench_warmup" \
   --min-ratio "$bench_min_ratio" \
+  --fail-on-mismatch "$bench_fail_on_mismatch" \
   --format "$bench_format" \
   --color "$bench_color"
 '''

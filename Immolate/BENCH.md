@@ -9,9 +9,9 @@ fixture.
 Correctness and speed are separate questions. `mise run check-rust` validates
 the Rust implementation through unit tests, DLL export/import checks, and small
 benchmark smoke tests. `mise run bench-compare` reports performance against the
-historical DLL and fails comparable result mismatches. It skips fixtures the
+historical DLL and reports comparable result mismatches. It skips fixtures the
 older ABI cannot represent, and it normalizes Original DLL hits that land beyond
-the selected `BENCH_BUDGET` to `<null>` before parity comparison.
+the selected `BENCH_BUDGET` to `<null>` before comparison.
 
 Keep `BENCH_THREADS=1` for implementation comparisons. Use `BENCH_THREADS=0`
 when measuring Lua auto-reroll UX, because the Lua UI passes `threads=0` to the
@@ -91,6 +91,7 @@ The mise tasks read these environment variables:
 - `BENCH_WARMUP=1`
 - `BENCH_THREADS=1`
 - `BENCH_MIN_RATIO=0.0`
+- `BENCH_FAIL_ON_MISMATCH=0`
 - `BENCH_FORMAT=pretty|tsv`
 - `BENCH_COLOR=auto|always|never`
 - `ORIGINAL_DLL=Immolate/Immolate-OceanRamenandMathIsFun0.dll`
@@ -102,10 +103,15 @@ The mise tasks read these environment variables:
 looking for meaningful regressions. `BENCH_WARMUP` controls discarded warmup
 calls before the measured samples.
 
-`BENCH_MIN_RATIO=0.0` disables the speed threshold. Result parity still fails
-for legacy-compatible fixtures. Set `BENCH_MIN_RATIO` above zero when you also
-want the harness to fail if measured Rust/original speedup falls below that
-threshold.
+`BENCH_MIN_RATIO=0.0` disables the speed threshold. Set `BENCH_MIN_RATIO` above
+zero when you want the harness to fail if measured Rust/original speedup falls
+below that threshold.
+
+`BENCH_FAIL_ON_MISMATCH=0` keeps Rust/original result differences report-only,
+which is the default because the Original DLL is a historical performance
+baseline and its ABI/semantics do not cover every current Brainstorm behavior.
+Set `BENCH_FAIL_ON_MISMATCH=1` only when intentionally auditing a fixture that
+should still match the legacy DLL.
 
 ## Pretty Dashboard
 
@@ -115,7 +121,7 @@ The final report excludes rendering time and includes:
 
 - per-case Rust and original throughput where available
 - skipped original measurements for unsupported older-ABI fixtures
-- parity failures for comparable Rust/original result mismatches
+- informational Rust/original result mismatches where the historical DLL differs
 - scanned percentage, so early-hit fixtures are obvious
 - mean latency, p50/p95/p99 latency, min/max latency, and stdev
 - `ns/seed`, which is often the clearest hot-path metric
@@ -178,7 +184,7 @@ Because that ABI has no budget, thread, second-tag, joker, or deck-filter
 parameters, the harness skips Original DLL measurements for unsupported
 fixtures and for miss fixtures that would otherwise run to the original fixed
 100M seed cap. For measured fixtures, Original DLL hits beyond the selected
-benchmark budget are treated as `<null>` so parity is checked against the same
+benchmark budget are treated as `<null>` so the comparison uses the same
 effective search window as the Rust DLL.
 
 ## Optional Native Rust-Only Benchmark

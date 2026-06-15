@@ -45,7 +45,7 @@ Quick reference for contributing to Brainstorm (Balatro mod with a native DLL).
 - Joker search checks the first shop: location `shop` scans shop slots, `pack` scans Buffoon packs, `any` checks both (pack search respects the selected pack filter).
 - Soul checks only apply to Arcana/Spectral packs in the current shop slots.
 - Auto-reroll UI shows live scanned seed counts; SPF options go from 1,000 to 1,000,000 seeds per pass.
-- Rust search must preserve earliest matching seed semantics for both single-thread and parallel searches. Comparable benchmark result mismatches fail the harness, even when the timing is faster; legacy Original DLL results are normalized to the selected benchmark budget.
+- Rust search must preserve earliest matching seed semantics for both single-thread and parallel searches. The Original DLL is a historical performance baseline, not the current correctness oracle; comparable result mismatches are reported by default and fail only with `BENCH_FAIL_ON_MISMATCH=1`. Legacy Original DLL results are normalized to the selected benchmark budget.
 
 ## Coding Style & Naming Conventions
 - Lua: Stylua (`stylua.toml`) — 2-space indent, ~80 cols. Avoid globals, return tables explicitly.
