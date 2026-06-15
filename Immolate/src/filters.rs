@@ -1,4 +1,5 @@
-use crate::instance::{Instance, pack_info, soul_yields_perkeo};
+use crate::engine::tables::{is_arcana_pack, is_buffoon_pack, is_soulable_pack, pack_info};
+use crate::instance::{Instance, soul_yields_perkeo};
 use crate::item::{CARDS, Item, is_joker_item, string_to_item};
 
 const CARDS_PER_SUIT: usize = 13;
@@ -232,7 +233,7 @@ pub fn apply_filters(inst: &mut Instance, cfg: &FilterConfig) -> bool {
                     }
                 }
             }
-            if cfg.perkeo && perkeo_found {
+            if cfg.perkeo && perkeo_found && (cfg.souls <= 0 || souls_found >= cfg.souls) {
                 break;
             }
         }
@@ -466,31 +467,6 @@ fn passes_erratic_filters(inst: &mut Instance, cfg: &FilterConfig) -> bool {
         }
     }
     true
-}
-
-fn is_arcana_pack(pack: Item) -> bool {
-    matches!(
-        pack,
-        Item::Arcana_Pack | Item::Jumbo_Arcana_Pack | Item::Mega_Arcana_Pack
-    )
-}
-
-fn is_spectral_pack(pack: Item) -> bool {
-    matches!(
-        pack,
-        Item::Spectral_Pack | Item::Jumbo_Spectral_Pack | Item::Mega_Spectral_Pack
-    )
-}
-
-fn is_soulable_pack(pack: Item) -> bool {
-    is_arcana_pack(pack) || is_spectral_pack(pack)
-}
-
-fn is_buffoon_pack(pack: Item) -> bool {
-    matches!(
-        pack,
-        Item::Buffoon_Pack | Item::Jumbo_Buffoon_Pack | Item::Mega_Buffoon_Pack
-    )
 }
 
 fn count_souls_in_pack(inst: &mut Instance, pack: Item, ante: i32) -> i32 {

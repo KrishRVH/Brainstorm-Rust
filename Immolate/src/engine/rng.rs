@@ -30,26 +30,26 @@ impl RngKey {
         self as usize
     }
 
-    const fn bytes(self) -> &'static [u8] {
+    pub const fn name(self) -> &'static str {
         match self {
-            Self::Tag1 => b"Tag1",
-            Self::Voucher1 => b"Voucher1",
-            Self::ShopPack1 => b"shop_pack1",
-            Self::Cdt1 => b"cdt1",
-            Self::RarityShop1 => b"rarity1sho",
-            Self::RarityBuffoon1 => b"rarity1buf",
-            Self::JokerCommonShop1 => b"Joker1sho1",
-            Self::JokerUncommonShop1 => b"Joker2sho1",
-            Self::JokerRareShop1 => b"Joker3sho1",
-            Self::JokerCommonBuffoon1 => b"Joker1buf1",
-            Self::JokerUncommonBuffoon1 => b"Joker2buf1",
-            Self::JokerRareBuffoon1 => b"Joker3buf1",
-            Self::JokerLegendary => b"Joker4",
-            Self::SoulTarot1 => b"soul_Tarot1",
-            Self::SoulSpectral1 => b"soul_Spectral1",
-            Self::TarotArcana1 => b"Tarotar11",
-            Self::SpectralPack1 => b"Spectralspe1",
-            Self::Erratic => b"erratic",
+            Self::Tag1 => "Tag1",
+            Self::Voucher1 => "Voucher1",
+            Self::ShopPack1 => "shop_pack1",
+            Self::Cdt1 => "cdt1",
+            Self::RarityShop1 => "rarity1sho",
+            Self::RarityBuffoon1 => "rarity1buf",
+            Self::JokerCommonShop1 => "Joker1sho1",
+            Self::JokerUncommonShop1 => "Joker2sho1",
+            Self::JokerRareShop1 => "Joker3sho1",
+            Self::JokerCommonBuffoon1 => "Joker1buf1",
+            Self::JokerUncommonBuffoon1 => "Joker2buf1",
+            Self::JokerRareBuffoon1 => "Joker3buf1",
+            Self::JokerLegendary => "Joker4",
+            Self::SoulTarot1 => "soul_Tarot1",
+            Self::SoulSpectral1 => "soul_Spectral1",
+            Self::TarotArcana1 => "Tarotar11",
+            Self::SpectralPack1 => "Spectralspe1",
+            Self::Erratic => "erratic",
         }
     }
 }
@@ -124,7 +124,7 @@ impl RngState {
     fn get_fixed_node(&mut self, key: RngKey, seed: &mut Seed, hashed_seed: f64) -> f64 {
         let node = &mut self.nodes[key.idx()];
         if !node.initialized {
-            node.value = initial_node(seed, key.bytes());
+            node.value = initial_node(seed, key.name().as_bytes());
             node.initialized = true;
         }
         advance_node(&mut node.value, hashed_seed)

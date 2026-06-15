@@ -303,7 +303,7 @@ fn composite_has_souls_and_perkeo(
                     break;
                 }
             }
-            if perkeo_found {
+            if perkeo_found && (cfg.raw.souls <= 0 || souls_found >= cfg.raw.souls) {
                 break;
             }
         }
@@ -539,7 +539,7 @@ fn randchoice(state: &mut SearchState, key: RngKey, items: &[Item], locks: &Lock
         return item;
     }
 
-    let base = key_name(key);
+    let base = key.name();
     let mut resample = 2;
     loop {
         let resample_key = format!("{base}_resample{resample}");
@@ -602,7 +602,7 @@ fn randchoice_unlocked(state: &mut SearchState, key: RngKey, items: &[Item]) -> 
         return item;
     }
 
-    let base = key_name(key);
+    let base = key.name();
     let mut resample = 2;
     loop {
         let resample_key = format!("{base}_resample{resample}");
@@ -618,28 +618,5 @@ fn randchoice_unlocked(state: &mut SearchState, key: RngKey, items: &[Item]) -> 
         if candidate != Item::RETRY || resample > 1000 {
             return candidate;
         }
-    }
-}
-
-fn key_name(key: RngKey) -> &'static str {
-    match key {
-        RngKey::Tag1 => "Tag1",
-        RngKey::Voucher1 => "Voucher1",
-        RngKey::ShopPack1 => "shop_pack1",
-        RngKey::Cdt1 => "cdt1",
-        RngKey::RarityShop1 => "rarity1sho",
-        RngKey::RarityBuffoon1 => "rarity1buf",
-        RngKey::JokerCommonShop1 => "Joker1sho1",
-        RngKey::JokerUncommonShop1 => "Joker2sho1",
-        RngKey::JokerRareShop1 => "Joker3sho1",
-        RngKey::JokerCommonBuffoon1 => "Joker1buf1",
-        RngKey::JokerUncommonBuffoon1 => "Joker2buf1",
-        RngKey::JokerRareBuffoon1 => "Joker3buf1",
-        RngKey::JokerLegendary => "Joker4",
-        RngKey::SoulTarot1 => "soul_Tarot1",
-        RngKey::SoulSpectral1 => "soul_Spectral1",
-        RngKey::TarotArcana1 => "Tarotar11",
-        RngKey::SpectralPack1 => "Spectralspe1",
-        RngKey::Erratic => "erratic",
     }
 }

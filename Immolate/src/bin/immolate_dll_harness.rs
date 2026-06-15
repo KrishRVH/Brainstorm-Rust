@@ -29,7 +29,7 @@ mod windows_harness {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use immolate::seed::Seed;
+    use immolate::seed::{SEED_SPACE, Seed};
 
     use super::bench_cases::{self as bench, BenchCase, BenchGroup, BenchShape};
 
@@ -53,7 +53,7 @@ mod windows_harness {
         c_double,
         c_longlong,
         c_int,
-    ) -> *const c_char;
+    ) -> *mut c_char;
     type OriginalBrainstorm = unsafe extern "C" fn(
         *const c_char,
         *const c_char,
@@ -63,7 +63,7 @@ mod windows_harness {
         bool,
         bool,
     ) -> *const c_char;
-    type FreeResult = unsafe extern "C" fn(*const c_char);
+    type FreeResult = unsafe extern "C" fn(*mut c_char);
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -285,7 +285,7 @@ mod windows_harness {
                 .to_string_lossy()
                 .into_owned();
             unsafe {
-                (self.free_result)(result);
+                (self.free_result)(result as *mut c_char);
             }
             Ok(Some(out))
         }
@@ -647,6 +647,15 @@ mod windows_harness {
             {
                 failed = true;
             }
+            if let Some(original) = comparison.original.as_ref() {
+                if comparison.rust.result != original.result {
+                    failed = true;
+                    eprintln!(
+                        "benchmark parity mismatch in {}: rust={} original={}",
+                        comparison.rust.case_name, comparison.rust.result, original.result
+                    );
+                }
+            }
             if settings.output.format == OutputFormat::Tsv {
                 print_tsv_compare(&comparison, min_ratio);
             }
@@ -656,7 +665,7 @@ mod windows_harness {
             print_compare_report(&comparisons, min_ratio, settings.output);
         }
         if failed {
-            Err("benchmark threshold failed".to_owned())
+            Err("benchmark threshold or parity failed".to_owned())
         } else {
             Ok(())
         }
@@ -733,12 +742,11 @@ mod windows_harness {
             let result = dll.run(case);
             let elapsed = started.elapsed();
             ticker.finish();
-            let result = result?;
-            let scanned = if implementation == "original" {
-                case.num_seeds
-            } else {
-                scanned_count(case, result.as_deref())
-            };
+            let mut result = result?;
+            if implementation == "original" {
+                result = normalize_legacy_original_result(case, result);
+            }
+            let scanned = scanned_count(case, result.as_deref());
             let elapsed_secs = elapsed.as_secs_f64();
             let seeds_per_sec = scanned as f64 / elapsed_secs;
             let ns_per_seed = elapsed_secs * 1_000_000_000.0 / scanned as f64;
@@ -1002,6 +1010,14 @@ mod windows_harness {
         result.unwrap_or("<null>")
     }
 
+    fn normalize_legacy_original_result(case: &Case, result: Option<String>) -> Option<String> {
+        result.filter(|seed| result_within_budget(case, seed))
+    }
+
+    fn result_within_budget(case: &Case, result: &str) -> bool {
+        result.is_empty() || seed_scan_count(case, result) <= case.num_seeds
+    }
+
     fn scanned_count(case: &Case, result: Option<&str>) -> i64 {
         let Some(result) = result else {
             return case.num_seeds;
@@ -1009,8 +1025,12 @@ mod windows_harness {
         if result.is_empty() {
             return 1;
         }
+        seed_scan_count(case, result).min(case.num_seeds)
+    }
+
+    fn seed_scan_count(case: &Case, result: &str) -> i64 {
         let start = case.seed_start.unwrap_or("");
-        (Seed::from_str(result).id() - Seed::from_str(start).id() + 1).max(1)
+        (Seed::from_str(result).id() - Seed::from_str(start).id()).rem_euclid(SEED_SPACE) + 1
     }
 
     fn original_skip_reason(case: &Case) -> Option<&'static str> {

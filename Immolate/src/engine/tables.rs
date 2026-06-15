@@ -1,6 +1,6 @@
 use crate::item::{
-    CARDS, COMMON_JOKERS, ITEM_COUNT, Item, LEGENDARY_JOKERS, PACKS, RARE_JOKERS, SPECTRALS, TAGS,
-    TAROTS, UNCOMMON_JOKERS, VOUCHERS, WeightedItem,
+    CARDS, COMMON_JOKERS, ITEM_COUNT, Item, LEGENDARY_JOKERS, PACKS, Pack, RARE_JOKERS, SPECTRALS,
+    TAGS, TAROTS, UNCOMMON_JOKERS, VOUCHERS, WeightedItem,
 };
 
 pub const POOL_COMMON: u8 = 1 << 0;
@@ -16,12 +16,6 @@ pub const COMMON_JOKER_POOL: &[Item] = &COMMON_JOKERS;
 pub const UNCOMMON_JOKER_POOL: &[Item] = &UNCOMMON_JOKERS;
 pub const RARE_JOKER_POOL: &[Item] = &RARE_JOKERS;
 pub const LEGENDARY_JOKER_POOL: &[Item] = &LEGENDARY_JOKERS;
-
-#[derive(Clone, Copy, Debug)]
-pub struct PackInfo {
-    pub size: usize,
-    pub choices: usize,
-}
 
 #[derive(Clone, Copy, Debug)]
 pub struct ShopRates {
@@ -143,50 +137,15 @@ pub fn target_joker_pools(target: Item) -> u8 {
     pools
 }
 
-pub fn pack_info(pack: Item) -> PackInfo {
-    match pack {
-        Item::Arcana_Pack | Item::Celestial_Pack | Item::Standard_Pack => PackInfo {
-            size: 3,
-            choices: 1,
-        },
-        Item::Jumbo_Arcana_Pack | Item::Jumbo_Celestial_Pack | Item::Jumbo_Standard_Pack => {
-            PackInfo {
-                size: 5,
-                choices: 1,
-            }
-        },
-        Item::Mega_Arcana_Pack | Item::Mega_Celestial_Pack | Item::Mega_Standard_Pack => PackInfo {
-            size: 5,
-            choices: 2,
-        },
-        Item::Buffoon_Pack => PackInfo {
-            size: 2,
-            choices: 1,
-        },
-        Item::Jumbo_Buffoon_Pack => PackInfo {
-            size: 4,
-            choices: 1,
-        },
-        Item::Mega_Buffoon_Pack => PackInfo {
-            size: 4,
-            choices: 2,
-        },
-        Item::Spectral_Pack => PackInfo {
-            size: 2,
-            choices: 1,
-        },
-        Item::Jumbo_Spectral_Pack => PackInfo {
-            size: 4,
-            choices: 1,
-        },
-        Item::Mega_Spectral_Pack => PackInfo {
-            size: 4,
-            choices: 2,
-        },
-        _ => PackInfo {
+pub fn pack_info(pack: Item) -> Pack {
+    if PACKS.iter().any(|entry| entry.item == pack) {
+        crate::instance::pack_info(pack)
+    } else {
+        Pack {
+            pack_type: Item::RETRY,
             size: 0,
             choices: 0,
-        },
+        }
     }
 }
 

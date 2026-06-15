@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use immolate::brainstorm_search_core;
 use immolate::filters::FilterConfig;
-use immolate::seed::Seed;
+use immolate::seed::{SEED_SPACE, Seed};
 
 #[path = "../bench_cases.rs"]
 mod bench_cases;
@@ -123,7 +123,8 @@ fn scanned_count(seed_start: &str, result: Option<&str>, budget: i64) -> i64 {
     if result.is_empty() {
         return 1;
     }
-    (Seed::from_str(result).id() - Seed::from_str(seed_start).id() + 1).clamp(1, budget)
+    ((Seed::from_str(result).id() - Seed::from_str(seed_start).id()).rem_euclid(SEED_SPACE) + 1)
+        .min(budget)
 }
 
 fn parse_args() -> Result<Args, String> {
