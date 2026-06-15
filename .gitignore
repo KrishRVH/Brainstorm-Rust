@@ -54,6 +54,7 @@ desktop.ini
 *.exe.stackdump
 
 # Config overrides (user-specific)
+config.lua
 config_override.lua
 local_config.lua
 

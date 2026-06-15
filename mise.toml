@@ -8,11 +8,10 @@ description = "List available Brainstorm tasks"
 run = "mise tasks ls"
 
 [tasks.setup]
-description = "Install mise-managed tools and local Lua lint tools"
+description = "Check required tools and install local Lua lint tools"
 shell = "bash -c"
 run = '''
 set -euo pipefail
-mise install
 rustup target add "${RUST_TARGET:-x86_64-pc-windows-gnu}"
 mise run setup-lua
 mise run doctor
@@ -40,7 +39,7 @@ luacheck --version
 '''
 
 [tasks.doctor]
-description = "Check required system and mise-managed development tools"
+description = "Check required system and local development tools"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -66,6 +65,7 @@ check_cmd x86_64-w64-mingw32-objdump
 check_cmd wine
 check_cmd file
 check_cmd zip
+check_cmd rsync
 
 rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
 if ! rustup target list --installed | grep -qx "$rust_target"; then
@@ -129,11 +129,11 @@ mise run check-version
 '''
 
 [tasks.build]
-description = "Build the default Rust Immolate.dll"
+description = "Build the Rust Immolate.dll artifact"
 run = "mise run build-rust"
 
 [tasks.build-rust]
-description = "Build the Rust DLL and copy it to target/rust and repo root"
+description = "Build the Rust DLL and copy it to target/rust"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -150,7 +150,6 @@ fi
 cargo build --manifest-path "$IMMO_DIR/Cargo.toml" --release --target "$rust_target"
 mkdir -p "$rust_artifact_dir"
 cp "$rust_dll" "$rust_artifact_dir/$DLL"
-cp "$rust_dll" "$DLL"
 '''
 
 [tasks.build-harness]
@@ -206,7 +205,7 @@ exports="$(
     sed -n '/^\[Ordinal\/Name Pointer\] Table$/,/^$/p' |
     awk '/\[[[:space:]]*[0-9]+\]/{print $NF}'
 )"
-expected="$(printf '%s\n' brainstorm_search free_result immolate_set_log_path | sort)"
+expected="$(printf '%s\n' brainstorm_search free_result immolate_last_error immolate_set_log_path | sort)"
 actual="$(printf '%s\n' "$exports" | sort)"
 if [ "$actual" != "$expected" ]; then
   echo "unexpected Rust DLL exports:"
@@ -355,15 +354,16 @@ mise run fmt-rust-check
 mise run clippy-rust
 mise run test-rust
 mise run check-rust-dll
-BENCH_BUDGET=1000 BENCH_REPEAT=1 BENCH_CASE=pack-miss mise run bench-rust
+BENCH_BUDGET=1000 BENCH_REPEAT=1 BENCH_CASE=tag-hit mise run bench-rust
+BENCH_BUDGET=20000 BENCH_REPEAT=1 BENCH_CASE=ux-tag-soul-pack mise run bench-rust
 '''
 
 [tasks.check]
-description = "Run Lua/Rust lint plus the Rust DLL validation gate"
+description = "Run Lua lint plus the Rust DLL validation gate"
 shell = "bash -c"
 run = '''
 set -euo pipefail
-mise run lint
+mise run lint-lua
 mise run check-rust
 '''
 
@@ -372,7 +372,7 @@ description = "Format Lua and Rust"
 shell = "bash -c"
 run = '''
 set -euo pipefail
-lua_files=(Brainstorm.lua UI.lua config.lua steamodded_compat.lua)
+lua_files=(Brainstorm.lua UI.lua steamodded_compat.lua)
 stylua "${lua_files[@]}"
 cargo fmt --manifest-path "$IMMO_DIR/Cargo.toml"
 '''
@@ -381,27 +381,70 @@ cargo fmt --manifest-path "$IMMO_DIR/Cargo.toml"
 description = "Alias for format"
 run = "mise run format"
 
+[tasks.lint-lua]
+description = "Check Lua formatting, bytecode syntax, luacheck, and version metadata"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+export PATH="$HOME/.luarocks/bin:$PATH"
+lua_files=(Brainstorm.lua UI.lua steamodded_compat.lua)
+syntax_lua_files=("${lua_files[@]}" nativefs.lua)
+
+command -v stylua >/dev/null || { echo "stylua not found. Install Stylua, then run: mise run doctor"; exit 1; }
+command -v luajit >/dev/null || { echo "luajit not found. Install LuaJIT, then run: mise run doctor"; exit 1; }
+command -v luacheck >/dev/null || { echo "luacheck not found. Run: mise run setup-lua"; exit 1; }
+
+stylua --check "${lua_files[@]}"
+for lua_file in "${syntax_lua_files[@]}"; do
+  luajit -b "$lua_file" "/tmp/brainstorm-${lua_file//\//-}.luajit"
+done
+luacheck "${lua_files[@]}"
+mise run check-version
+'''
+
+[tasks.lint-rust]
+description = "Check Rust formatting and clippy"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+cargo fmt --manifest-path "$IMMO_DIR/Cargo.toml" --check
+cargo clippy --manifest-path "$IMMO_DIR/Cargo.toml" --all-targets -- -D warnings
+'''
+
 [tasks.lint]
 description = "Check Lua and Rust formatting/lints"
 shell = "bash -c"
 run = '''
 set -euo pipefail
-export PATH="$HOME/.luarocks/bin:$PATH"
-lua_files=(Brainstorm.lua UI.lua config.lua steamodded_compat.lua)
+mise run lint-lua
+mise run lint-rust
+'''
 
-command -v stylua >/dev/null || { echo "stylua not found. Run: mise install"; exit 1; }
-command -v luajit >/dev/null || { echo "luajit not found. Install LuaJIT, then run: mise run doctor"; exit 1; }
-command -v luacheck >/dev/null || { echo "luacheck not found. Run: mise run setup-lua"; exit 1; }
+[tasks.stage-payload]
+description = "Stage the Brainstorm install payload under target/package/Brainstorm"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+version_number="$(sed -n 's/^version = "\([^"]*\)"/\1/p' lovely.toml | head -n1)"
+stage_root="$TARGET_DIR/package"
+stage_dir="$stage_root/Brainstorm"
+rust_artifact="$TARGET_DIR/rust/$DLL"
 
-stylua --check "${lua_files[@]}"
-for lua_file in "${lua_files[@]}"; do
-  luajit -b "$lua_file" "/tmp/brainstorm-${lua_file//\//-}.luajit"
-done
-luacheck "${lua_files[@]}"
-mise run check-version
+[ -n "$version_number" ] || {
+  echo "lovely.toml manifest version is missing"
+  exit 1
+}
+[ -f "$rust_artifact" ] || mise run build-rust
 
-cargo fmt --manifest-path "$IMMO_DIR/Cargo.toml" --check
-cargo clippy --manifest-path "$IMMO_DIR/Cargo.toml" --all-targets -- -D warnings
+rm -rf "$stage_root"
+mkdir -p "$stage_dir"
+cp Brainstorm.lua UI.lua lovely.toml nativefs.lua steamodded_compat.lua LICENSE NOTICE.md "$stage_dir"/
+cp "$rust_artifact" "$stage_dir/$DLL"
+sed -i -E '0,/^dump_lua = .*/s//dump_lua = false/' "$stage_dir/lovely.toml"
+{
+  echo "$version_number"
+  date
+} > "$stage_dir/VERSION"
 '''
 
 [tasks.release]
@@ -410,27 +453,22 @@ shell = "bash -c"
 run = '''
 set -euo pipefail
 mise run check
+mise run stage-payload
 
 version_number="$(sed -n 's/^version = "\([^"]*\)"/\1/p' lovely.toml | head -n1)"
-package_dir="Brainstorm_v$version_number"
-package_zip="$package_dir.zip"
+package_dir="Brainstorm"
+package_zip="Brainstorm_v$version_number.zip"
+stage_dir="$TARGET_DIR/package/$package_dir"
 release_dir="release/$package_dir"
 
 rm -rf release
-mkdir -p "$release_dir"
-cp Brainstorm.lua UI.lua config.lua lovely.toml nativefs.lua steamodded_compat.lua "$release_dir"/
-cp "$DLL" "$release_dir"/
-{
-  echo "$version_number"
-  date
-} > "$release_dir/VERSION"
+mkdir -p release
+cp -a "$stage_dir" "$release_dir"
 zip_path="release/$package_zip"
-if command -v zip >/dev/null; then
-  (cd release && zip -r "$package_zip" "$package_dir" >/dev/null)
-  echo "created $zip_path"
-else
-  echo "zip not found"
-fi
+command -v zip >/dev/null || { echo "zip not found"; exit 1; }
+(cd release && zip -r "$package_zip" "$package_dir" >/dev/null)
+test -s "$zip_path"
+echo "created $zip_path"
 '''
 
 [tasks.deploy]
@@ -438,14 +476,36 @@ description = "Build, validate, and copy the mod to TARGET"
 shell = "bash -c"
 run = '''
 set -euo pipefail
-mise run check-rust
-target="${TARGET:-/mnt/c/Users/Krish/AppData/Roaming/Balatro/Mods/Brainstorm}"
+mise run check
+mise run stage-payload
+
+resolve_target() {
+  if [ -n "${TARGET:-}" ]; then
+    printf '%s\n' "$TARGET"
+    return
+  fi
+  if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
+    appdata="$(powershell.exe -NoProfile -Command '[Environment]::GetFolderPath("ApplicationData")' | tr -d '\r' | tail -n1)"
+    if [ -n "$appdata" ]; then
+      wslpath "$appdata/Balatro/Mods/Brainstorm"
+      return
+    fi
+  fi
+  echo "Set TARGET to your Balatro Mods/Brainstorm directory." >&2
+  exit 1
+}
+
+target="$(resolve_target)"
+stage_dir="$TARGET_DIR/package/Brainstorm"
+
+if [ "$(basename "$target")" != "Brainstorm" ]; then
+  echo "TARGET must end with /Brainstorm: $target"
+  exit 1
+fi
 
 echo "Deploying to $target"
 mkdir -p "$target"
-rm -rf "$target/Core" "$target/UI"
-cp Brainstorm.lua UI.lua config.lua lovely.toml nativefs.lua steamodded_compat.lua "$target"/
-cp "$DLL" "$target/$DLL"
+rsync -a --delete --exclude config.lua "$stage_dir"/ "$target"/
 '''
 
 [tasks.clean]
