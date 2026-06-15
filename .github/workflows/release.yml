@@ -90,6 +90,8 @@ jobs:
           notes="$(cat <<'EOF'
           Brainstorm Supercharged production release.
 
+          Credits: original Brainstorm by OceanRamen; rewrite by KRVH.
+
           Install:
           1. Download and unzip the release file that contains `Immolate.dll`.
           2. Place all unzipped contents in `.../%appdata%/balatro/mods`.
