@@ -28,6 +28,33 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - name: Set up mise
+        uses: jdx/mise-action@v2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            binutils-mingw-w64-x86-64 \
+            file \
+            gcc-mingw-w64-x86-64 \
+            luajit \
+            luarocks \
+            rsync \
+            wine \
+            zip
+
+      - name: Install project tools
+        run: |
+          cargo install stylua --version 2.3.1 --locked
+          mise trust
+          mise run setup-lua
+
       - name: Read release version
         run: |
           version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' lovely.toml | head -n1)"
@@ -35,29 +62,14 @@ jobs:
             echo "lovely.toml manifest version is missing"
             exit 1
           fi
-          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-          echo "RELEASE_TITLE=Brainstorm Supercharged v$version" >> "$GITHUB_ENV"
-          echo "PACKAGE_ZIP=Brainstorm_v$version.zip" >> "$GITHUB_ENV"
+          {
+            echo "RELEASE_VERSION=$version"
+            echo "RELEASE_TITLE=Brainstorm Supercharged v$version"
+            echo "PACKAGE_ZIP=Brainstorm_v$version.zip"
+          } >> "$GITHUB_ENV"
 
       - name: Package release zip
-        run: |
-          package_dir="Brainstorm_v${RELEASE_VERSION}"
-          release_dir="release/${package_dir}"
-
-          test -f Immolate.dll || {
-            echo "Immolate.dll is missing from the checkout"
-            exit 1
-          }
-
-          mkdir -p "${release_dir}"
-          cp Brainstorm.lua UI.lua config.lua lovely.toml nativefs.lua steamodded_compat.lua "${release_dir}/"
-          cp Immolate.dll "${release_dir}/"
-          {
-            echo "${RELEASE_VERSION}"
-            date
-          } > "${release_dir}/VERSION"
-
-          (cd release && zip -r "${PACKAGE_ZIP}" "${package_dir}" >/dev/null)
+        run: mise run release
 
       - name: Stage release artifacts
         run: |

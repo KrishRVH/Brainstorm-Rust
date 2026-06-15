@@ -354,8 +354,30 @@ mise run fmt-rust-check
 mise run clippy-rust
 mise run test-rust
 mise run check-rust-dll
-BENCH_BUDGET=1000 BENCH_REPEAT=1 BENCH_CASE=tag-hit mise run bench-rust
-BENCH_BUDGET=20000 BENCH_REPEAT=1 BENCH_CASE=ux-tag-soul-pack mise run bench-rust
+mise run build-harness
+
+rust_artifact="$TARGET_DIR/rust/$DLL"
+rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
+harness="$IMMO_DIR/target/$rust_target/release/immolate_dll_harness.exe"
+
+smoke_bench() {
+  bench_case="$1"
+  bench_budget="$2"
+
+  echo "Benchmarking Rust $DLL smoke: $bench_case"
+  wine "$harness" bench \
+    --dll "$(winepath -w "$(readlink -f "$rust_artifact")")" \
+    --case "$bench_case" \
+    --budget "$bench_budget" \
+    --threads "${BENCH_THREADS:-1}" \
+    --repeat 1 \
+    --warmup "${BENCH_WARMUP:-1}" \
+    --format "${BENCH_FORMAT:-pretty}" \
+    --color "${BENCH_COLOR:-auto}"
+}
+
+smoke_bench tag-hit 1000
+smoke_bench ux-tag-soul-pack 20000
 '''
 
 [tasks.check]
