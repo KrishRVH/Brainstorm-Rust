@@ -13,8 +13,7 @@ Brainstorm = _G.Brainstorm
 
 Brainstorm.VERSION = Brainstorm.VERSION or "Brainstorm"
 
--- Reserved for Steammodded compatibility
-Brainstorm.SMODS = Brainstorm.SMODS or nil
+-- Steamodded compatibility reserves Brainstorm.SMODS for reload-time state.
 
 Brainstorm.SPF_KEYS = {
   "1000",

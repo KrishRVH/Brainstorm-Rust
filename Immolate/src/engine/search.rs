@@ -106,7 +106,8 @@ fn search_filters_exact_parallel(
 
     result
         .lock()
-        .map_or(None, |guard| guard.as_ref().map(|(_, seed)| seed.clone()))
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|(_, seed)| seed.clone()))
 }
 
 fn search_block(start: i64, count: i64, cfg: &CompiledFilter) -> Option<String> {

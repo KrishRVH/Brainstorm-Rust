@@ -1,4 +1,5 @@
 use crate::rng::pseudostep;
+use std::fmt::Write as _;
 
 pub const SEED_SPACE: i64 = 2_318_107_019_761;
 pub const SEED_CHARS: &[u8; 35] = b"123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -141,7 +142,7 @@ impl std::fmt::Display for Seed {
             if self.seed[i] != -1 {
                 let idx = self.seed[i] as usize;
                 let ch = SEED_CHARS.get(idx).copied().unwrap_or(b'?') as char;
-                f.write_str(&ch.to_string())?;
+                f.write_char(ch)?;
             }
         }
         Ok(())
