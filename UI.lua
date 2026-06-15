@@ -163,46 +163,12 @@ local function rebuild_joker_options()
     return a < b
   end)
 end
--- Seeds per frame (SPF) options for auto-reroll batch size
--- Higher values test more seeds per pass and can stall a frame on heavy filters.
-local spf_list = {
-  ["1000"] = 1000,
-  ["2500"] = 2500,
-  ["5000"] = 5000,
-  ["10000"] = 10000,
-  ["25000"] = 25000,
-  ["50000"] = 50000,
-  ["100000"] = 100000,
-  ["250000"] = 250000,
-  ["500000"] = 500000,
-  ["1000000"] = 1000000,
-}
-
-local spf_keys = {
-  "1000",
-  "2500",
-  "5000",
-  "10000",
-  "25000",
-  "50000",
-  "100000",
-  "250000",
-  "500000",
-  "1000000",
-}
+local spf_list = Brainstorm.SPF_LIST
+local spf_keys = Brainstorm.SPF_KEYS
 
 -- Suit ratio options for Erratic deck filtering
 -- Represents minimum percentage of cards in top 2 suits
-local ratio_list = {
-  ["Disabled"] = 0,
-  ["50%"] = 0.5, -- Common
-  ["60%"] = 0.6, -- Uncommon
-  ["65%"] = 0.65, -- Rare
-  ["70%"] = 0.7, -- Very rare
-  ["75%"] = 0.75, -- Extremely rare
-  ["80%"] = 0.8, -- Likely impossible, but allowed
-  ["85%"] = 0.85, -- Likely impossible, but allowed
-}
+local ratio_list = Brainstorm.RATIO_MAP
 
 local ratio_keys =
   { "Disabled", "50%", "60%", "65%", "70%", "75%", "80%", "85%" }
@@ -377,32 +343,7 @@ G.FUNCS.apply_joker_filter = function()
 end
 
 G.FUNCS.reset_brainstorm_settings = function()
-  config.ar_filters.tag_id = 1
-  config.ar_filters.tag_name = tag_list["None"] or ""
-  config.ar_filters.tag2_id = 1
-  config.ar_filters.tag2_name = tag_list["None"] or ""
-  config.ar_filters.voucher_id = 1
-  config.ar_filters.voucher_name = voucher_list["None"] or ""
-  config.ar_filters.pack_id = 1
-  config.ar_filters.pack = pack_list["None"] or {}
-  config.ar_filters.joker_search = ""
-  config.ar_filters.joker_name = ""
-  config.ar_filters.joker_id = 1
-  config.ar_filters.joker_location_id = 1
-  config.ar_filters.joker_location = joker_location_list["In Any Location"]
-    or "any"
-  config.ar_filters.soul_skip = 0
-  config.ar_filters.inst_observatory = false
-  config.ar_filters.inst_perkeo = false
-
-  config.ar_prefs.face_count = 0
-  config.ar_prefs.suit_ratio_percent = "Disabled"
-  config.ar_prefs.suit_ratio_decimal = ratio_list["Disabled"] or 0
-  config.ar_prefs.suit_ratio_id = option_index_for_value(ratio_keys, "Disabled")
-  local default_spf_key = "100000"
-  config.ar_prefs.spf_id = option_index_for_value(spf_keys, default_spf_key)
-  config.ar_prefs.spf_int = spf_list[default_spf_key] or 100000
-
+  Brainstorm.reset_config()
   write_config()
   refresh_brainstorm_tab()
 end
@@ -422,8 +363,20 @@ end
 
 -- Seeds per frame callback
 G.FUNCS.change_spf = function(x)
-  config.ar_prefs.spf_id = x.to_key
-  config.ar_prefs.spf_int = spf_list[x.to_val]
+  local spf_key = tostring(x.to_val or "")
+  local spf_value = spf_list[spf_key]
+  if spf_value then
+    config.ar_prefs.spf_id = clamp_index(x.to_key, #spf_keys)
+    config.ar_prefs.spf_int = spf_value
+  else
+    local current_key = spf_keys[clamp_index(
+      config.ar_prefs.spf_id or 1,
+      #spf_keys
+    )] or Brainstorm.DEFAULT_SPF_KEY
+    config.ar_prefs.spf_id = option_index_for_value(spf_keys, current_key)
+    config.ar_prefs.spf_int = spf_list[current_key]
+      or spf_list[Brainstorm.DEFAULT_SPF_KEY]
+  end
   write_config()
 end
 
@@ -441,250 +394,285 @@ G.FUNCS.change_suit_ratio = function(x)
   write_config()
 end
 
-Brainstorm.opt_ref = G.FUNCS.options
-G.FUNCS.options = function(e)
-  Brainstorm.opt_ref(e)
+function Brainstorm.build_settings_tab()
+  return {
+    label = "Brainstorm",
+    tab_definition_function = function()
+      rebuild_joker_options()
+      local joker_option =
+        clamp_index(config.ar_filters.joker_id or 1, #joker_keys)
+      if
+        config.ar_filters.joker_name
+        and config.ar_filters.joker_name ~= ""
+      then
+        joker_option =
+          option_index_for_value(joker_keys, config.ar_filters.joker_name)
+      end
+      local joker_location_option = clamp_index(
+        config.ar_filters.joker_location_id or 1,
+        #joker_location_keys
+      )
+      if
+        config.ar_filters.joker_location
+        and config.ar_filters.joker_location ~= ""
+      then
+        joker_location_option =
+          location_index_for_value(config.ar_filters.joker_location)
+      end
+      local tag_option =
+        option_index_for_mapping(tag_keys, tag_list, config.ar_filters.tag_name)
+      local tag2_option = option_index_for_mapping(
+        tag_keys,
+        tag_list,
+        config.ar_filters.tag2_name
+      )
+      local voucher_option = option_index_for_mapping(
+        voucher_keys,
+        voucher_list,
+        config.ar_filters.voucher_name
+      )
+      local pack_option =
+        option_index_for_pack(pack_keys, config.ar_filters.pack)
+      return {
+        n = G.UIT.ROOT,
+        config = {
+          align = "cm",
+          padding = 0.05,
+          colour = G.C.CLEAR,
+        },
+        nodes = {
+          {
+            n = G.UIT.C,
+            config = {
+              align = "cm",
+              padding = 0.05,
+              r = 0.1,
+              colour = darken(G.C.UI.TRANSPARENT_DARK, 0.25),
+            },
+            nodes = {
+              create_option_cycle({
+                label = "AR: TAG 1 SEARCH",
+                scale = 0.8,
+                w = 4,
+                options = tag_keys,
+                opt_callback = "change_target_tag",
+                current_option = tag_option,
+              }),
+              create_option_cycle({
+                label = "AR: TAG 2 SEARCH",
+                scale = 0.8,
+                w = 4,
+                options = tag_keys,
+                opt_callback = "change_target_tag2",
+                current_option = tag2_option,
+              }),
+              create_option_cycle({
+                label = "AR: VOUCHER SEARCH",
+                scale = 0.8,
+                w = 4,
+                options = voucher_keys,
+                opt_callback = "change_target_voucher",
+                current_option = voucher_option,
+              }),
+              create_option_cycle({
+                label = "AR: PACK SEARCH",
+                scale = 0.8,
+                w = 4,
+                options = pack_keys,
+                opt_callback = "change_target_pack",
+                current_option = pack_option,
+              }),
+              {
+                n = G.UIT.R,
+                config = { align = "cm", padding = 0.05 },
+                nodes = {
+                  {
+                    n = G.UIT.R,
+                    config = { align = "cm" },
+                    nodes = {
+                      {
+                        n = G.UIT.T,
+                        config = {
+                          text = "AR: JOKER FILTER",
+                          scale = 0.4,
+                          colour = G.C.UI.TEXT_LIGHT,
+                        },
+                      },
+                    },
+                  },
+                  {
+                    n = G.UIT.R,
+                    config = { align = "cm", padding = 0.05 },
+                    nodes = {
+                      create_text_input({
+                        ref_table = config.ar_filters,
+                        ref_value = "joker_search",
+                        prompt_text = "Filter jokers...",
+                        text_scale = 0.3,
+                        w = 2.6,
+                        h = 0.6,
+                        max_length = 24,
+                        extended_corpus = true,
+                      }),
+                      UIBox_button({
+                        label = { "Apply" },
+                        button = "apply_joker_filter",
+                        minw = 0.9,
+                        scale = 0.3,
+                        col = true,
+                        colour = G.C.BLUE,
+                      }),
+                    },
+                  },
+                },
+              },
+              create_option_cycle({
+                label = "AR: JOKER SEARCH",
+                scale = 0.8,
+                w = 4,
+                options = joker_keys,
+                opt_callback = "change_search_joker",
+                current_option = joker_option,
+              }),
+              create_option_cycle({
+                label = "AR: JOKER LOCATION",
+                scale = 0.8,
+                w = 4,
+                options = joker_location_keys,
+                opt_callback = "change_search_joker_location",
+                current_option = joker_location_option,
+              }),
+            },
+          },
+          {
+            n = G.UIT.C,
+            config = {
+              align = "cm",
+              padding = 0.05,
+              r = 0.1,
+              colour = darken(G.C.UI.TRANSPARENT_DARK, 0.25),
+            },
+            nodes = {
+              create_toggle({
+                label = "Enable Brainstorm",
+                scale = 0.8,
+                ref_table = config,
+                ref_value = "enable",
+                callback = write_config,
+              }),
+              create_option_cycle({
+                label = "AR: Seeds per frame",
+                scale = 0.8,
+                w = 4,
+                options = spf_keys,
+                opt_callback = "change_spf",
+                current_option = clamp_index(
+                  Brainstorm.config.ar_prefs.spf_id or 1,
+                  #spf_keys
+                ),
+              }),
+              create_toggle({
+                label = "AR: INST OBSERVATORY",
+                scale = 0.8,
+                ref_table = Brainstorm.config.ar_filters,
+                ref_value = "inst_observatory",
+                callback = write_config,
+              }),
+              create_toggle({
+                label = "AR: INST PERKEO",
+                scale = 0.8,
+                ref_table = Brainstorm.config.ar_filters,
+                ref_value = "inst_perkeo",
+                callback = write_config,
+              }),
+              create_option_cycle({
+                label = "AR: N. SOULS",
+                scale = 0.8,
+                w = 4,
+                options = { 0, 1 },
+                opt_callback = "change_soul_count",
+                current_option = (Brainstorm.config.ar_filters.soul_skip or 0)
+                  + 1,
+              }),
+              create_option_cycle({
+                label = "ED: Min. # of Face Cards",
+                scale = 0.8,
+                w = 4,
+                options = (function()
+                  local opts = {}
+                  -- UI max is 35; 32+ is extremely rare (untested).
+                  for i = 0, 35 do
+                    opts[#opts + 1] = i
+                  end
+                  return opts
+                end)(),
+                opt_callback = "change_face_count",
+                current_option = (Brainstorm.config.ar_prefs.face_count or 0)
+                  + 1,
+              }),
+              create_option_cycle({
+                label = "ED: Suit Ratio ",
+                scale = 0.8,
+                w = 4,
+                options = ratio_keys,
+                opt_callback = "change_suit_ratio",
+                current_option = Brainstorm.config.ar_prefs.suit_ratio_id or 1,
+              }),
+              UIBox_button({
+                label = { "Reset All" },
+                button = "reset_brainstorm_settings",
+                minw = 3.5,
+                scale = 0.45,
+                colour = G.C.ORANGE,
+              }),
+              {
+                n = G.UIT.R,
+                config = { align = "cm", padding = 0.02 },
+                nodes = {
+                  {
+                    n = G.UIT.T,
+                    config = {
+                      text = "Original: OceanRamen. Rewrite: KRVH. Immolate: MathIsFun0.",
+                      scale = 0.28,
+                      colour = G.C.UI.TEXT_LIGHT,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }
+    end,
+    tab_definition_function_args = "Brainstorm",
+  }
+end
+
+Brainstorm._ui_hooks = Brainstorm._ui_hooks or {}
+
+local function has_brainstorm_tab(tabs)
+  for _, tab in ipairs(tabs) do
+    if tab and tab.label == "Brainstorm" then
+      return true
+    end
+  end
+  return false
 end
 
 -- Hook into the game's settings tab creation
 -- Adds the Brainstorm tab to the settings menu
-local ct = create_tabs
-function create_tabs(args)
-  -- Check if this is the main settings tabs (tab_h == 7.05)
-  if args and args.tab_h == 7.05 then
-    -- Add Brainstorm tab
-    args.tabs[#args.tabs + 1] = {
-      label = "Brainstorm",
-      tab_definition_function = function()
-        rebuild_joker_options()
-        local joker_option =
-          clamp_index(config.ar_filters.joker_id or 1, #joker_keys)
-        if
-          config.ar_filters.joker_name
-          and config.ar_filters.joker_name ~= ""
-        then
-          joker_option =
-            option_index_for_value(joker_keys, config.ar_filters.joker_name)
-        end
-        local joker_location_option = clamp_index(
-          config.ar_filters.joker_location_id or 1,
-          #joker_location_keys
-        )
-        if
-          config.ar_filters.joker_location
-          and config.ar_filters.joker_location ~= ""
-        then
-          joker_location_option =
-            location_index_for_value(config.ar_filters.joker_location)
-        end
-        local tag_option = option_index_for_mapping(
-          tag_keys,
-          tag_list,
-          config.ar_filters.tag_name
-        )
-        local tag2_option = option_index_for_mapping(
-          tag_keys,
-          tag_list,
-          config.ar_filters.tag2_name
-        )
-        local voucher_option = option_index_for_mapping(
-          voucher_keys,
-          voucher_list,
-          config.ar_filters.voucher_name
-        )
-        local pack_option =
-          option_index_for_pack(pack_keys, config.ar_filters.pack)
-        return {
-          n = G.UIT.ROOT,
-          config = {
-            align = "cm",
-            padding = 0.05,
-            colour = G.C.CLEAR,
-          },
-          nodes = {
-            {
-              n = G.UIT.C,
-              config = {
-                align = "cm",
-                padding = 0.05,
-                r = 0.1,
-                colour = darken(G.C.UI.TRANSPARENT_DARK, 0.25),
-              },
-              nodes = {
-                create_option_cycle({
-                  label = "AR: TAG 1 SEARCH",
-                  scale = 0.8,
-                  w = 4,
-                  options = tag_keys,
-                  opt_callback = "change_target_tag",
-                  current_option = tag_option,
-                }),
-                create_option_cycle({
-                  label = "AR: TAG 2 SEARCH",
-                  scale = 0.8,
-                  w = 4,
-                  options = tag_keys,
-                  opt_callback = "change_target_tag2",
-                  current_option = tag2_option,
-                }),
-                create_option_cycle({
-                  label = "AR: VOUCHER SEARCH",
-                  scale = 0.8,
-                  w = 4,
-                  options = voucher_keys,
-                  opt_callback = "change_target_voucher",
-                  current_option = voucher_option,
-                }),
-                create_option_cycle({
-                  label = "AR: PACK SEARCH",
-                  scale = 0.8,
-                  w = 4,
-                  options = pack_keys,
-                  opt_callback = "change_target_pack",
-                  current_option = pack_option,
-                }),
-                {
-                  n = G.UIT.R,
-                  config = { align = "cm", padding = 0.05 },
-                  nodes = {
-                    {
-                      n = G.UIT.R,
-                      config = { align = "cm" },
-                      nodes = {
-                        {
-                          n = G.UIT.T,
-                          config = {
-                            text = "AR: JOKER FILTER",
-                            scale = 0.4,
-                            colour = G.C.UI.TEXT_LIGHT,
-                          },
-                        },
-                      },
-                    },
-                    {
-                      n = G.UIT.R,
-                      config = { align = "cm", padding = 0.05 },
-                      nodes = {
-                        create_text_input({
-                          ref_table = config.ar_filters,
-                          ref_value = "joker_search",
-                          prompt_text = "Filter jokers...",
-                          text_scale = 0.3,
-                          w = 2.6,
-                          h = 0.6,
-                          max_length = 24,
-                          extended_corpus = true,
-                        }),
-                        UIBox_button({
-                          label = { "Apply" },
-                          button = "apply_joker_filter",
-                          minw = 0.9,
-                          scale = 0.3,
-                          col = true,
-                          colour = G.C.BLUE,
-                        }),
-                      },
-                    },
-                  },
-                },
-                create_option_cycle({
-                  label = "AR: JOKER SEARCH",
-                  scale = 0.8,
-                  w = 4,
-                  options = joker_keys,
-                  opt_callback = "change_search_joker",
-                  current_option = joker_option,
-                }),
-                create_option_cycle({
-                  label = "AR: JOKER LOCATION",
-                  scale = 0.8,
-                  w = 4,
-                  options = joker_location_keys,
-                  opt_callback = "change_search_joker_location",
-                  current_option = joker_location_option,
-                }),
-              },
-            },
-            {
-              n = G.UIT.C,
-              config = {
-                align = "cm",
-                padding = 0.05,
-                r = 0.1,
-                colour = darken(G.C.UI.TRANSPARENT_DARK, 0.25),
-              },
-              nodes = {
-                create_option_cycle({
-                  label = "AP: Seeds per frame",
-                  scale = 0.8,
-                  w = 4,
-                  options = spf_keys,
-                  opt_callback = "change_spf",
-                  current_option = Brainstorm.config.ar_prefs.spf_id or 1,
-                }),
-                create_toggle({
-                  label = "AR: INST OBSERVATORY",
-                  scale = 0.8,
-                  ref_table = Brainstorm.config.ar_filters,
-                  ref_value = "inst_observatory",
-                  callback = write_config,
-                }),
-                create_toggle({
-                  label = "AR: INST PERKEO",
-                  scale = 0.8,
-                  ref_table = Brainstorm.config.ar_filters,
-                  ref_value = "inst_perkeo",
-                  callback = write_config,
-                }),
-                create_option_cycle({
-                  label = "AR: N. SOULS",
-                  scale = 0.8,
-                  w = 4,
-                  options = { 0, 1 },
-                  opt_callback = "change_soul_count",
-                  current_option = (
-                    Brainstorm.config.ar_filters.soul_skip or 0
-                  ) + 1,
-                }),
-                create_option_cycle({
-                  label = "ED: Min. # of Face Cards",
-                  scale = 0.8,
-                  w = 4,
-                  options = (function()
-                    local opts = {}
-                    -- UI max is 35; 32+ is extremely rare (untested).
-                    for i = 0, 35 do
-                      opts[#opts + 1] = i
-                    end
-                    return opts
-                  end)(),
-                  opt_callback = "change_face_count",
-                  current_option = (Brainstorm.config.ar_prefs.face_count or 0)
-                    + 1,
-                }),
-                create_option_cycle({
-                  label = "ED: Suit Ratio ",
-                  scale = 0.8,
-                  w = 4,
-                  options = ratio_keys,
-                  opt_callback = "change_suit_ratio",
-                  current_option = Brainstorm.config.ar_prefs.suit_ratio_id
-                    or 1,
-                }),
-                UIBox_button({
-                  label = { "Reset All" },
-                  button = "reset_brainstorm_settings",
-                  minw = 3.5,
-                  scale = 0.45,
-                  colour = G.C.ORANGE,
-                }),
-              },
-            },
-          },
-        }
-      end,
-      tab_definition_function_args = "Brainstorm",
-    }
+if not Brainstorm._ui_hooks.create_tabs then
+  Brainstorm._ui_hooks.create_tabs = create_tabs
+  function create_tabs(args)
+    -- Check if this is the main settings tabs (tab_h == 7.05)
+    if
+      args
+      and args.tab_h == 7.05
+      and type(args.tabs) == "table"
+      and not has_brainstorm_tab(args.tabs)
+    then
+      args.tabs[#args.tabs + 1] = Brainstorm.build_settings_tab()
+    end
+    return Brainstorm._ui_hooks.create_tabs(args)
   end
-  return ct(args)
 end
