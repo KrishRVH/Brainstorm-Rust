@@ -7,10 +7,11 @@ fixture.
 ## Benchmark Philosophy
 
 Correctness and speed are separate questions. `mise run check-rust` validates
-the Rust implementation through unit tests, DLL export/import checks, and a
-small benchmark smoke test. `mise run bench-compare` is a performance report
-against the historical DLL, not a parity gate, because the older DLL uses a
-different ABI, fixed search behavior, and fewer filters.
+the Rust implementation through unit tests, DLL export/import checks, and small
+benchmark smoke tests. `mise run bench-compare` reports performance against the
+historical DLL and fails comparable result mismatches. It skips fixtures the
+older ABI cannot represent, and it normalizes Original DLL hits that land beyond
+the selected `BENCH_BUDGET` to `<null>` before parity comparison.
 
 Keep `BENCH_THREADS=1` for implementation comparisons. Use `BENCH_THREADS=0`
 when measuring Lua auto-reroll UX, because the Lua UI passes `threads=0` to the
@@ -101,9 +102,10 @@ The mise tasks read these environment variables:
 looking for meaningful regressions. `BENCH_WARMUP` controls discarded warmup
 calls before the measured samples.
 
-`BENCH_MIN_RATIO=0.0` is report-only. Set it above zero only when you want the
-harness to fail if measured Rust/original speedup falls below that threshold on
-legacy-compatible fixtures.
+`BENCH_MIN_RATIO=0.0` disables the speed threshold. Result parity still fails
+for legacy-compatible fixtures. Set `BENCH_MIN_RATIO` above zero when you also
+want the harness to fail if measured Rust/original speedup falls below that
+threshold.
 
 ## Pretty Dashboard
 
@@ -113,6 +115,7 @@ The final report excludes rendering time and includes:
 
 - per-case Rust and original throughput where available
 - skipped original measurements for unsupported older-ABI fixtures
+- parity failures for comparable Rust/original result mismatches
 - scanned percentage, so early-hit fixtures are obvious
 - mean latency, p50/p95/p99 latency, min/max latency, and stdev
 - `ns/seed`, which is often the clearest hot-path metric
@@ -174,7 +177,9 @@ calling it.
 Because that ABI has no budget, thread, second-tag, joker, or deck-filter
 parameters, the harness skips Original DLL measurements for unsupported
 fixtures and for miss fixtures that would otherwise run to the original fixed
-100M seed cap.
+100M seed cap. For measured fixtures, Original DLL hits beyond the selected
+benchmark budget are treated as `<null>` so parity is checked against the same
+effective search window as the Rust DLL.
 
 ## Optional Native Rust-Only Benchmark
 

@@ -5,11 +5,12 @@ Quick reference for contributing to Brainstorm (Balatro mod with a native DLL).
 ## Credits
 - Brainstorm created by OceanRamen. Fork and rewrite by KRVH.
 - Immolate created by MathIsFun0.
+- Steamodded metadata and shipped notices must credit OceanRamen for the original Brainstorm and KRVH for this rewrite.
 
 ## Project Structure & Module Organization
-- Lua entry/UI: `Brainstorm.lua`, `UI.lua`; config/compat in `config.lua`, `lovely.toml`, `nativefs.lua`, `steamodded_compat.lua`.
+- Lua entry/UI: `Brainstorm.lua`, `UI.lua`; mod metadata/compat in `lovely.toml`, `nativefs.lua`, `steamodded_compat.lua`.
 - Native sources: `Immolate/` is the Rust DLL crate. `Immolate/src/` contains the implementation and benchmark harnesses.
-- Artifacts: DLL is `Immolate.dll` (default). Build/lint/format/deploy all use `mise.toml`. The current Rust artifact is kept under `target/rust/`.
+- Artifacts: build/lint/format/deploy all use `mise.toml`. The current Rust DLL artifact is kept under `target/rust/Immolate.dll` and staged into release/deploy payloads as `Immolate.dll`.
 - Version source of truth: `[manifest].version` in `lovely.toml`. `steamodded_compat.lua` must stay in sync; use `VERSION=x.y mise run bump-version`.
 - `BalatroSource/` is the literal game source; never commit it to git and always use it as the source of truth for understanding game behavior.
 - `BalatroSource_Guide.md` summarizes seed/search-relevant mechanics verified from `BalatroSource/`.
@@ -17,17 +18,17 @@ Quick reference for contributing to Brainstorm (Balatro mod with a native DLL).
 
 ## Build and Development Commands
 - First run in a checkout: `mise trust`.
-- Install mise-managed tools and local Lua lint tools: `mise run setup`.
+- Check required tools and install local Lua lint tools: `mise run setup`.
 - Dependency check: `mise run doctor`.
-- Build: `mise run build` outputs the Rust `Immolate.dll`.
+- Build: `mise run build` outputs `target/rust/Immolate.dll`.
 - Rust validation: `mise run check-rust`.
 - Full validation: `mise run check`.
 - Benchmarks: `mise run bench-compare` compares Rust against the Original Brainstorm DLL where the older ABI can represent the fixture.
 - Full-suite benchmark report: `mise run bench-full`.
 - Actual Lua UI UX benchmark report: `mise run bench-ux`.
 - Pretty full-suite dashboard: `mise run bench-pretty`.
-- Deploy: `TARGET=/mnt/c/Users/Krish/AppData/Roaming/Balatro/Mods/Brainstorm mise run deploy`.
-- Release: `mise run release` (runs validation, builds the DLL, and zips `release/Brainstorm_v<VERSION>.zip`).
+- Deploy: `mise run deploy` auto-detects the WSL Windows Balatro mods path when possible; otherwise use `TARGET=/path/to/Balatro/Mods/Brainstorm mise run deploy`.
+- Release: `mise run release` (runs validation, builds the DLL, stages `Brainstorm/`, and zips `release/Brainstorm_v<VERSION>.zip`).
 - Release workflow: `.github/workflows/release.yml` publishes/updates the `latest` production release on `master` pushes and manual dispatch.
 - Version bump: `VERSION=3.2 mise run bump-version`.
 - Formatting: `mise run format` (runs stylua and rustfmt).
@@ -38,11 +39,13 @@ Quick reference for contributing to Brainstorm (Balatro mod with a native DLL).
 ## Architecture & FFI Safety
 - DLL entry: `immolate.brainstorm_search(seed_start, voucher_key, pack_key, tag1_key, tag2_key, joker_name, joker_location, souls, observatory, perkeo, deck_key, erratic, no_faces, min_face_cards, suit_ratio, num_seeds, threads)`; pass Balatro keys (e.g. `v_telescope`, `tag_charm`, `p_spectral_mega_1`), always `free_result()` on non-empty returns, and wrap FFI in `pcall`.
 - Lua loads `Immolate.dll`.
+- Runtime config is generated/migrated into Balatro's Love save directory; do not ship or commit generated `config.lua`.
+- The Brainstorm settings tab includes an `Enable Brainstorm` toggle. When disabled, config/UI remain available, but runtime actions should not run.
 - Pack filter simulates both shop pack slots; voucher check is ante-1 voucher; observatory reuses the same pack/voucher rolls, and Perkeo requires The Soul to roll Perkeo (legendary pool).
 - Joker search checks the first shop: location `shop` scans shop slots, `pack` scans Buffoon packs, `any` checks both (pack search respects the selected pack filter).
 - Soul checks only apply to Arcana/Spectral packs in the current shop slots.
 - Auto-reroll UI shows live scanned seed counts; SPF options go from 1,000 to 1,000,000 seeds per pass.
-- Rust search must preserve earliest matching seed semantics for both single-thread and parallel searches. Benchmark result mismatches fail the harness, even when the timing is faster.
+- Rust search must preserve earliest matching seed semantics for both single-thread and parallel searches. Comparable benchmark result mismatches fail the harness, even when the timing is faster; legacy Original DLL results are normalized to the selected benchmark budget.
 
 ## Coding Style & Naming Conventions
 - Lua: Stylua (`stylua.toml`) — 2-space indent, ~80 cols. Avoid globals, return tables explicitly.
@@ -51,4 +54,4 @@ Quick reference for contributing to Brainstorm (Balatro mod with a native DLL).
 
 ## Commit & Pull Request Guidelines
 - Use short, imperative subjects (scope prefix optional: `core:`, `ui:`, `dll:`). Do not commit `release/` artifacts.
-- In PRs, state intent and note binary artifacts touched (`Immolate.dll`). Attach UI screenshots for visual changes.
+- In PRs, state intent and note binary artifacts touched (`target/rust/Immolate.dll` or release payload DLLs). Attach UI screenshots for visual changes.

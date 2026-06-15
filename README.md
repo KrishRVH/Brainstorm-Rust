@@ -9,11 +9,12 @@ Brainstorm is a Balatro mod that rapidly searches for seeds matching
 voucher/pack/tag/Joker/Erratic Deck filters and integrates directly into the
 game loop through Lua plus a native Rust DLL.
 
-This fork is a substantial expansion of OceanRamen's original Brainstorm mod:
-it adds the Rust native search engine, first-shop Joker search, dual-tag
+KRVH's rewrite is a substantial expansion of OceanRamen's original Brainstorm
+mod: it adds the Rust native search engine, first-shop Joker search, dual-tag
 filters, Erratic Deck filters, save/load state slots, searchable Joker UI,
 resettable preferences, live auto-reroll scan counts, benchmark automation,
-release packaging, and compatibility fixes for the current Balatro mod stack.
+release packaging, Steamodded metadata, and compatibility fixes for the current
+Balatro mod stack.
 
 ## Setup (Required First)
 1. Install `smods-1.0.0-beta` (Steamodded) for Balatro.
@@ -25,15 +26,17 @@ mise run build
 ```
 4. Deploy the mod from source:
 ```bash
-TARGET=/mnt/c/Users/Krish/AppData/Roaming/Balatro/Mods/Brainstorm mise run deploy
+mise run deploy
 ```
-If `/mnt/c` write permissions fail, run with `sudo` or adjust mount permissions.
+If auto-detection cannot find your Balatro mods folder, set `TARGET` to the
+full `.../Balatro/Mods/Brainstorm` path.
 If you do not want to build from source, skip to "Installation (no build)" below.
 
 ## Credits
 This project is licensed under CC BY-NC-SA 4.0.
 
-- Brainstorm was created by OceanRamen. This KRVH fork derives from
+- Brainstorm was created by OceanRamen. KRVH rewrote and maintains this fork,
+  which derives from
   https://github.com/OceanRamen/Brainstorm, which is licensed under the Mozilla
   Public License Version 2.0.
 - The Immolate native DLL source was created in C++ by MathIsFun0. KRVH rewrote
@@ -41,6 +44,8 @@ This project is licensed under CC BY-NC-SA 4.0.
   search workflow. This project uses CC BY-NC-SA 4.0 to remain compatible with
   the original Immolate source:
   https://github.com/SpectralPack/Immolate/tree/26f41efcc313f045bc8bdbf49e5851c56ac40b31.
+- Steamodded metadata credits OceanRamen for the original Brainstorm and KRVH
+  for this rewrite.
 
 ## Features
 - Auto-reroll with dual-tag support (order-agnostic or same-tag-twice).
@@ -50,16 +55,18 @@ This project is licensed under CC BY-NC-SA 4.0.
 - Erratic Deck filters for face-card count, no-face searches, and suit-ratio searches.
 - Joker list is alphabetized with a name filter for quick searching; Reset All
   clears filters and preferences back to defaults.
-- Save/load state (Z/X + 1-5), reroll hotkeys (Ctrl+R, Ctrl+A), settings UI (Ctrl+T).
+- Enable toggle, save/load state (Z/X + 1-5), reroll hotkeys (Ctrl+R,
+  Ctrl+A), settings UI (Ctrl+T).
 - Rust benchmark harness compares current speed against the Original Brainstorm
-  DLL where the older ABI supports the same fixture.
+  DLL where the older ABI supports the same fixture, and fails comparable
+  result mismatches.
 - Production release automation publishes the `latest` release with a versioned
   title and versioned zip artifact.
 
 ## Requirements
 - Balatro (Steam, Windows 64-bit).
 - Lovely injector (required): https://github.com/ethangreen-dev/lovely-injector
-- WSL2 for building/deploying from this repo.
+- WSL2 for building/deploying from this repo on Windows.
 - mise for development tasks: https://mise.jdx.dev/
 - Rust 1.96+ with the Windows GNU target:
 ```bash
@@ -73,12 +80,13 @@ rustup target add x86_64-pc-windows-gnu
 `mise.toml` is the development interface. Run `mise trust` once per checkout,
 then use `mise run <task>`.
 
-`mise run build` builds the Rust native DLL and writes `Immolate.dll`.
+`mise run build` builds the Rust native DLL and writes
+`target/rust/Immolate.dll`.
 
 `mise run lint` runs Lua formatting, LuaJIT bytecode syntax checks, luacheck,
 rustfmt, and clippy. `mise run check-rust` runs Rust formatting, clippy, unit
-tests, DLL export/import validation, and a benchmark smoke. `mise run check`
-runs both.
+tests, DLL export/import validation, and hit/composite benchmark smokes.
+`mise run check` runs Lua lint plus the Rust validation gate.
 
 Strict full-suite benchmark report:
 
@@ -105,8 +113,8 @@ Use this when bumping versions:
 VERSION=3.2 mise run bump-version
 ```
 
-`mise run release` runs validation, builds `Immolate.dll`, and creates
-`release/Brainstorm_v<VERSION>.zip`.
+`mise run release` runs validation, builds `target/rust/Immolate.dll`, stages a
+`Brainstorm/` install folder, and creates `release/Brainstorm_v<VERSION>.zip`.
 
 `.github/workflows/release.yml` runs on pushes to `master` and can also be
 triggered manually. It rebuilds the release zip and updates the production
@@ -117,6 +125,7 @@ release titled `Brainstorm Supercharged v<VERSION>` at tag `latest`.
 - `BalatroSource_Guide.md`: verified Balatro source mechanics relevant to
   search parity and future mod work.
 - `Immolate/BENCH.md`: benchmark harness, gates, and fixture groups.
+- `NOTICE.md`: project, rewrite, Immolate, and third-party attribution notices.
 
 ## Installation (no build)
 Download the latest release zip from
@@ -133,11 +142,17 @@ Brainstorm/
 ├── Brainstorm.lua
 ├── UI.lua
 ├── Immolate.dll           # Native DLL
-├── config.lua
 ├── lovely.toml
+├── LICENSE
+├── NOTICE.md
 ├── nativefs.lua
-└── steamodded_compat.lua
+├── steamodded_compat.lua
+└── VERSION
 ```
+
+User settings are generated at runtime in Balatro's Love save directory and are
+not part of the release payload. Existing legacy `config.lua` files in a mod
+folder are migrated into that save-directory config.
 
 ## Usage
 - Open settings: Ctrl+T. Toggle auto-reroll: Ctrl+A. Manual reroll: Ctrl+R.
@@ -146,9 +161,11 @@ Brainstorm/
   (searchable list + location), souls, observatory, Perkeo.
 - Configure Erratic Deck filters when searching for opening hands by face-card
   count, no faces, or suit concentration.
+- Use "Enable Brainstorm" to disable runtime actions without losing settings.
 - Use "Reset All" in the Brainstorm tab to restore filter and Erratic deck
   settings to defaults.
 
 ## Troubleshooting
 - Missing DLL or wrong build: rerun `mise run build` and
-  `TARGET=/mnt/c/Users/Krish/AppData/Roaming/Balatro/Mods/Brainstorm mise run deploy`.
+  `mise run deploy`. If auto-detection fails, set `TARGET` to the full
+  `.../Balatro/Mods/Brainstorm` path.
