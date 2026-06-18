@@ -1,9 +1,10 @@
 # Brainstorm for Balatro
-<img width="1536" height="864" alt="Brainstorm 3" src="https://github.com/user-attachments/assets/68a97977-3c80-4259-9378-58540a7b749e" />
 
 **Just want to install it?** Open this repository's **Releases** page, click
 the `latest` release, download the Brainstorm zip, and follow the installation
 guide written in that release.
+
+<img width="1829" height="1662" alt="image" src="https://github.com/user-attachments/assets/185f0fab-16f0-431e-9573-97138cac9c28" />
 
 Brainstorm is a Balatro mod that rapidly searches for seeds matching
 voucher/pack/tag/Joker/Erratic Deck filters and integrates directly into the
