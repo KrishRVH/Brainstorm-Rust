@@ -54,10 +54,12 @@ This project is licensed under CC BY-NC-SA 4.0.
   Joker in shop slots or Buffoon packs, observatory (Telescope + Mega
   Celestial), Perkeo (The Soul rolls Perkeo).
 - Erratic Deck filters for face-card count, no-face searches, and suit-ratio searches.
-- Joker list is alphabetized with a name filter for quick searching; Reset All
-  clears filters and preferences back to defaults.
+- Joker list is alphabetized, searchable, and excludes first-shop impossible
+  targets such as Legendary/Soul-only Jokers, enhancement-gated Jokers, and
+  pool-flag-gated Jokers.
 - Enable toggle, save/load state (Z/X + 1-5), reroll hotkeys (Ctrl+R,
-  Ctrl+A), settings UI (Ctrl+T).
+  Ctrl+A), settings UI (Ctrl+T), and throttled live scan-count text during
+  auto-reroll.
 - Rust benchmark harness compares current speed against the Original Brainstorm
   DLL where the older ABI supports the same fixture, and reports comparable
   result mismatches.
@@ -89,17 +91,25 @@ rustfmt, and clippy. `mise run check-rust` runs Rust formatting, clippy, unit
 tests, DLL export/import validation, and hit/composite benchmark smokes.
 `mise run check` runs Lua lint plus the Rust validation gate.
 
-Strict full-suite benchmark report:
+Strict user-facing full-suite benchmark report:
 
 ```bash
 mise run bench-full
 ```
 
-Actual Lua UI UX benchmark report:
+This uses the same `threads=0` path as Lua auto-reroll and fails if any
+comparable Rust/original case drops below parity.
+
+DLL UX-fixture benchmark report using UI-reachable cases and Lua-style
+`threads=0`:
 
 ```bash
 mise run bench-ux
 ```
+
+For true in-game Lua timing, profile `Brainstorm.auto_reroll()` inside Balatro.
+For native Linux-side Rust profiling without the Windows DLL ABI, use
+`brainstorm_bench` as described in `Immolate/BENCH.md`.
 
 See `Immolate/BENCH.md` for benchmark workflows.
 
@@ -160,6 +170,8 @@ folder are migrated into that save-directory config.
 - Save/load state: Z/X + 1-5.
 - Configure filters: dual tags, voucher, pack (two shop slots), Joker
   (searchable list + location), souls, observatory, Perkeo.
+- Impossible first-shop Joker targets are hidden from the Joker selector, and
+  impossible native filter combinations return no match immediately.
 - Configure Erratic Deck filters when searching for opening hands by face-card
   count, no faces, or suit concentration.
 - Use "Enable Brainstorm" to disable runtime actions without losing settings.

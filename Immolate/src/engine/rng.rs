@@ -56,14 +56,9 @@ impl RngKey {
 
 #[derive(Clone, Debug)]
 pub struct RngState {
-    nodes: [Node; KEY_COUNT],
+    nodes: [f64; KEY_COUNT],
+    initialized_mask: u32,
     dynamic_nodes: Vec<DynamicNode>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct Node {
-    initialized: bool,
-    value: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -75,10 +70,8 @@ struct DynamicNode {
 impl Default for RngState {
     fn default() -> Self {
         Self {
-            nodes: [Node {
-                initialized: false,
-                value: 0.0,
-            }; KEY_COUNT],
+            nodes: [0.0; KEY_COUNT],
+            initialized_mask: 0,
             dynamic_nodes: Vec::with_capacity(8),
         }
     }
@@ -86,9 +79,7 @@ impl Default for RngState {
 
 impl RngState {
     pub fn clear(&mut self) {
-        for node in &mut self.nodes {
-            node.initialized = false;
-        }
+        self.initialized_mask = 0;
         self.dynamic_nodes.clear();
     }
 
@@ -122,12 +113,14 @@ impl RngState {
     }
 
     fn get_fixed_node(&mut self, key: RngKey, seed: &mut Seed, hashed_seed: f64) -> f64 {
-        let node = &mut self.nodes[key.idx()];
-        if !node.initialized {
-            node.value = initial_node(seed, key.name().as_bytes());
-            node.initialized = true;
+        let idx = key.idx();
+        let initialized_bit = 1_u32 << idx;
+        let node = &mut self.nodes[idx];
+        if self.initialized_mask & initialized_bit == 0 {
+            *node = initial_node(seed, key.name().as_bytes());
+            self.initialized_mask |= initialized_bit;
         }
-        advance_node(&mut node.value, hashed_seed)
+        advance_node(node, hashed_seed)
     }
 
     fn get_dynamic_node(&mut self, key: &str, seed: &mut Seed, hashed_seed: f64) -> f64 {

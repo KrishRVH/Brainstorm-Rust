@@ -26,8 +26,3 @@ pub fn resolve_threads(threads: i32) -> usize {
         .map_or(1, std::num::NonZeroUsize::get)
         .clamp(1, 4)
 }
-
-#[allow(dead_code)]
-pub fn seed_space() -> i64 {
-    SEED_SPACE
-}

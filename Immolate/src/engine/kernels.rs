@@ -3,10 +3,9 @@ use crate::engine::rng::RngKey;
 use crate::engine::seed::SearchState;
 use crate::engine::tables::{
     COMMON_JOKER_POOL, LEGENDARY_JOKER_POOL, Locks, POOL_COMMON, POOL_RARE, POOL_UNCOMMON,
-    RARE_JOKER_POOL, SPECTRAL_POOL, TAG_POOL, TAROT_POOL, UNCOMMON_JOKER_POOL, VOUCHER_POOL,
+    RARE_JOKER_POOL, STANDARD_JOKER_POOLS, TAG_POOL, UNCOMMON_JOKER_POOL, VOUCHER_POOL,
     card_face_and_suit, is_ante1_locked_tag, is_arcana_pack, is_buffoon_pack, is_soulable_pack,
-    is_spectral_pack, pack_info, shop_item_type, shop_rates_for_deck, target_joker_pools,
-    weighted_packs,
+    is_spectral_pack, pack_info, shop_item_type, shop_rates_for_deck, weighted_packs,
 };
 use crate::filters::apply_filters;
 use crate::instance::Instance;
@@ -26,6 +25,8 @@ pub fn apply_compiled_filter(state: &mut SearchState, cfg: &CompiledFilter) -> b
         KernelShape::Souls => souls(state, cfg),
         KernelShape::Perkeo => perkeo(state, cfg),
         KernelShape::Erratic => erratic(state, cfg),
+        KernelShape::TagObservatory => tag_observatory(state, cfg),
+        KernelShape::SpectralSoulPerkeo => spectral_soul_perkeo(state, cfg),
         KernelShape::Composite => composite(state, cfg),
         KernelShape::Generic => generic_fallback(state, cfg),
     }
@@ -50,7 +51,7 @@ fn tag_only(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
 }
 
 fn voucher_only(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
-    next_voucher(state, cfg.raw.deck) == cfg.raw.voucher
+    next_voucher(state, &cfg.base_locks) == cfg.raw.voucher
 }
 
 fn pack_only(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
@@ -58,29 +59,50 @@ fn pack_only(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
 }
 
 fn observatory(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
-    if next_voucher(state, cfg.raw.deck) != Item::Telescope {
+    if next_voucher(state, &cfg.base_locks) != Item::Telescope {
         return false;
     }
     roll_second_pack(state) == Item::Mega_Celestial_Pack
 }
 
-fn shop_joker(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
-    if cfg.target_joker_pools & (POOL_COMMON | POOL_UNCOMMON | POOL_RARE) == 0 {
+fn tag_observatory(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
+    if !second_pack_is(state, Item::Mega_Celestial_Pack) {
         return false;
     }
-    shop_has_joker(state, cfg.raw.joker, cfg.target_joker_pools, cfg.raw.deck)
+    if next_voucher(state, &cfg.base_locks) != Item::Telescope {
+        return false;
+    }
+    tag_only(state, cfg)
+}
+
+fn shop_joker(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
+    if cfg.target_joker_pools & STANDARD_JOKER_POOLS == 0 {
+        return false;
+    }
+    shop_has_joker(
+        state,
+        cfg.raw.joker,
+        cfg.target_joker_pools,
+        cfg.raw.deck,
+        &cfg.base_locks,
+    )
 }
 
 fn pack_joker(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
-    if cfg.target_joker_pools & (POOL_COMMON | POOL_UNCOMMON | POOL_RARE) == 0 {
+    if cfg.target_joker_pools & STANDARD_JOKER_POOLS == 0 {
         return false;
     }
     let packs = pack_slots(state, cfg.needs_packs);
     packs.into_iter().any(|pack| {
-        pack != Item::RETRY
-            && (cfg.raw.pack == Item::RETRY || pack == cfg.raw.pack)
+        pack_matches_filter(pack, cfg.raw.pack)
             && is_buffoon_pack(pack)
-            && buffoon_pack_has_joker(state, pack, cfg.raw.joker, cfg.raw.deck)
+            && buffoon_pack_has_joker(
+                state,
+                pack,
+                cfg.raw.joker,
+                cfg.target_joker_pools,
+                &cfg.base_locks,
+            )
     })
 }
 
@@ -105,10 +127,15 @@ fn any_joker(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
         return pack_joker(state, cfg);
     }
     packs.into_iter().any(|pack| {
-        pack != Item::RETRY
-            && pack == cfg.raw.pack
+        pack_matches_filter(pack, cfg.raw.pack)
             && is_buffoon_pack(pack)
-            && buffoon_pack_has_joker(state, pack, cfg.raw.joker, cfg.raw.deck)
+            && buffoon_pack_has_joker(
+                state,
+                pack,
+                cfg.raw.joker,
+                cfg.target_joker_pools,
+                &cfg.base_locks,
+            )
     })
 }
 
@@ -117,47 +144,41 @@ fn souls(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
         return false;
     }
     let packs = pack_slots(state, cfg.needs_packs);
-    let mut souls_found = 0_i64;
     for pack in packs {
-        if pack == Item::RETRY || (cfg.raw.pack != Item::RETRY && pack != cfg.raw.pack) {
+        if !pack_matches_filter(pack, cfg.raw.pack) || !is_soulable_pack(pack) {
             continue;
         }
-        if !is_soulable_pack(pack) {
-            continue;
-        }
-        let max_possible = pack_info(pack).size as i64;
-        if souls_found + max_possible < cfg.raw.souls {
-            continue;
-        }
-        souls_found += i64::from(count_souls_in_pack(state, pack, cfg.raw.deck));
-        if souls_found >= cfg.raw.souls {
+        if pack_contains_soul(state, pack, &cfg.base_locks) {
             return true;
         }
     }
-    souls_found >= cfg.raw.souls
+    false
 }
 
 fn perkeo(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
     let packs = pack_slots(state, cfg.needs_packs);
     for pack in packs {
-        if pack == Item::RETRY || (cfg.raw.pack != Item::RETRY && pack != cfg.raw.pack) {
+        if !pack_matches_filter(pack, cfg.raw.pack) || !is_soulable_pack(pack) {
             continue;
         }
-        if !is_soulable_pack(pack) {
+        if !pack_contains_soul(state, pack, &cfg.base_locks) {
             continue;
         }
-        let souls_in_pack = count_souls_in_pack(state, pack, cfg.raw.deck);
-        if souls_in_pack == 0 {
-            continue;
-        }
-        let uses = usize::from(souls_in_pack).min(pack_info(pack).choices);
-        for _ in 0..uses {
-            if soul_yields_perkeo(state, cfg.raw.deck) {
-                return true;
-            }
+        if pack_info(pack).choices > 0 && soul_yields_perkeo(state, &cfg.base_locks) {
+            return true;
         }
     }
     false
+}
+
+fn spectral_soul_perkeo(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
+    if !second_pack_is(state, cfg.raw.pack) {
+        return false;
+    }
+    if !spectral_pack_contains_soul(state, pack_info(cfg.raw.pack).size, &cfg.base_locks) {
+        return false;
+    }
+    soul_yields_perkeo(state, &cfg.base_locks)
 }
 
 fn erratic(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
@@ -174,6 +195,11 @@ fn erratic(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
     let mut total = 0_i32;
     let mut face_count = 0_i32;
     let mut suit_count = [0_i32; 4];
+    let fixed_total_suit_requirement = if cfg.raw.suit_ratio > 0.0 && !cfg.raw.no_faces {
+        (cfg.raw.suit_ratio * 52.0).ceil() as i32
+    } else {
+        0
+    };
     for drawn in 0..52 {
         let idx = state
             .rng
@@ -194,6 +220,11 @@ fn erratic(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
         if cfg.raw.min_face_cards > 0 && face_count + remaining < cfg.raw.min_face_cards {
             return false;
         }
+        if fixed_total_suit_requirement > 0
+            && top_two_suit_count(suit_count) + remaining < fixed_total_suit_requirement
+        {
+            return false;
+        }
     }
 
     if cfg.raw.min_face_cards > 0 && face_count < cfg.raw.min_face_cards {
@@ -203,19 +234,23 @@ fn erratic(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
         if total == 0 {
             return false;
         }
-        let mut first = 0_i32;
-        let mut second = 0_i32;
-        for count in suit_count {
-            if count >= first {
-                second = first;
-                first = count;
-            } else if count > second {
-                second = count;
-            }
-        }
-        return f64::from(first + second) / f64::from(total) >= cfg.raw.suit_ratio;
+        return f64::from(top_two_suit_count(suit_count)) / f64::from(total) >= cfg.raw.suit_ratio;
     }
     true
+}
+
+fn top_two_suit_count(suit_count: [i32; 4]) -> i32 {
+    let mut first = 0_i32;
+    let mut second = 0_i32;
+    for count in suit_count {
+        if count >= first {
+            second = first;
+            first = count;
+        } else if count > second {
+            second = count;
+        }
+    }
+    first + second
 }
 
 fn composite(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
@@ -225,7 +260,7 @@ fn composite(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
 
     let mut first_voucher = Item::RETRY;
     if cfg.raw.voucher != Item::RETRY || cfg.raw.observatory {
-        first_voucher = next_voucher(state, cfg.raw.deck);
+        first_voucher = next_voucher(state, &cfg.base_locks);
         if cfg.raw.voucher != Item::RETRY && first_voucher != cfg.raw.voucher {
             return false;
         }
@@ -258,7 +293,13 @@ fn composite(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
 
 fn composite_has_joker(state: &mut SearchState, cfg: &CompiledFilter, packs: [Item; 2]) -> bool {
     if cfg.wants_joker_shop
-        && shop_has_joker(state, cfg.raw.joker, cfg.target_joker_pools, cfg.raw.deck)
+        && shop_has_joker(
+            state,
+            cfg.raw.joker,
+            cfg.target_joker_pools,
+            cfg.raw.deck,
+            &cfg.base_locks,
+        )
     {
         return true;
     }
@@ -267,10 +308,15 @@ fn composite_has_joker(state: &mut SearchState, cfg: &CompiledFilter, packs: [It
     }
 
     packs.into_iter().any(|pack| {
-        pack != Item::RETRY
-            && (cfg.raw.pack == Item::RETRY || pack == cfg.raw.pack)
+        pack_matches_filter(pack, cfg.raw.pack)
             && is_buffoon_pack(pack)
-            && buffoon_pack_has_joker(state, pack, cfg.raw.joker, cfg.raw.deck)
+            && buffoon_pack_has_joker(
+                state,
+                pack,
+                cfg.raw.joker,
+                cfg.target_joker_pools,
+                &cfg.base_locks,
+            )
     })
 }
 
@@ -279,37 +325,30 @@ fn composite_has_souls_and_perkeo(
     cfg: &CompiledFilter,
     packs: [Item; 2],
 ) -> bool {
-    let mut souls_found = 0_i64;
+    let mut soul_found = cfg.raw.souls <= 0;
     let mut perkeo_found = !cfg.raw.perkeo;
     for pack in packs {
-        if pack == Item::RETRY || (cfg.raw.pack != Item::RETRY && pack != cfg.raw.pack) {
-            continue;
-        }
-        if !is_soulable_pack(pack) {
+        if !pack_matches_filter(pack, cfg.raw.pack) || !is_soulable_pack(pack) {
             continue;
         }
 
-        let souls_in_pack = count_souls_in_pack(state, pack, cfg.raw.deck);
-        if souls_in_pack == 0 {
+        if !pack_contains_soul(state, pack, &cfg.base_locks) {
             continue;
         }
-        souls_found += i64::from(souls_in_pack);
+        soul_found = true;
 
-        if cfg.raw.perkeo {
-            let uses = usize::from(souls_in_pack).min(pack_info(pack).choices);
-            for _ in 0..uses {
-                if soul_yields_perkeo(state, cfg.raw.deck) {
-                    perkeo_found = true;
-                    break;
-                }
-            }
-            if perkeo_found && (cfg.raw.souls <= 0 || souls_found >= cfg.raw.souls) {
-                break;
-            }
+        if cfg.raw.perkeo
+            && pack_info(pack).choices > 0
+            && soul_yields_perkeo(state, &cfg.base_locks)
+        {
+            perkeo_found = true;
+        }
+        if soul_found && perkeo_found {
+            break;
         }
     }
 
-    (cfg.raw.souls <= 0 || souls_found >= cfg.raw.souls) && perkeo_found
+    soul_found && perkeo_found
 }
 
 fn pack_slots(state: &mut SearchState, needed: bool) -> [Item; 2] {
@@ -320,11 +359,33 @@ fn pack_slots(state: &mut SearchState, needed: bool) -> [Item; 2] {
     }
 }
 
+fn pack_matches_filter(pack: Item, selected_pack: Item) -> bool {
+    pack != Item::RETRY && (selected_pack == Item::RETRY || pack == selected_pack)
+}
+
 fn roll_second_pack(state: &mut SearchState) -> Item {
     let poll = state
         .rng
         .random(RngKey::ShopPack1, &mut state.seed, state.hashed_seed)
         * weighted_packs()[0].weight;
+    roll_second_pack_for_poll(poll)
+}
+
+fn second_pack_is(state: &mut SearchState, target: Item) -> bool {
+    let poll = state
+        .rng
+        .random(RngKey::ShopPack1, &mut state.seed, state.hashed_seed)
+        * weighted_packs()[0].weight;
+    match target {
+        Item::Mega_Celestial_Pack => poll > 12.5 && poll <= 13.0,
+        Item::Spectral_Pack => poll > 21.45 && poll <= 22.05,
+        Item::Jumbo_Spectral_Pack => poll > 22.05 && poll <= 22.35,
+        Item::Mega_Spectral_Pack => poll > 22.35 && poll <= 22.42,
+        _ => roll_second_pack_for_poll(poll) == target,
+    }
+}
+
+fn roll_second_pack_for_poll(poll: f64) -> Item {
     let mut weight = 0.0;
     for entry in &weighted_packs()[1..] {
         weight += entry.weight;
@@ -337,19 +398,17 @@ fn roll_second_pack(state: &mut SearchState) -> Item {
         .map_or(Item::RETRY, |entry| entry.item)
 }
 
-fn next_voucher(state: &mut SearchState, deck: Item) -> Item {
-    if deck == Item::Red_Deck {
-        return randchoice_unlocked(state, RngKey::Voucher1, VOUCHER_POOL);
-    }
-    randchoice(
-        state,
-        RngKey::Voucher1,
-        VOUCHER_POOL,
-        &Locks::for_deck(deck),
-    )
+fn next_voucher(state: &mut SearchState, locks: &Locks) -> Item {
+    randchoice(state, RngKey::Voucher1, VOUCHER_POOL, locks)
 }
 
-fn shop_has_joker(state: &mut SearchState, target: Item, target_pools: u8, deck: Item) -> bool {
+fn shop_has_joker(
+    state: &mut SearchState,
+    target: Item,
+    target_pools: u8,
+    deck: Item,
+    locks: &Locks,
+) -> bool {
     let rates = shop_rates_for_deck(deck);
     for _ in 0..2 {
         let poll = state
@@ -359,58 +418,84 @@ fn shop_has_joker(state: &mut SearchState, target: Item, target_pools: u8, deck:
         if shop_item_type(rates, poll) != Item::T_Joker {
             continue;
         }
-        if next_joker_item(state, JokerSource::Shop, target_pools, deck) == target {
+        if next_joker_item(state, JokerSource::Shop, target_pools, locks) == target {
             return true;
         }
     }
     false
 }
 
-fn buffoon_pack_has_joker(state: &mut SearchState, pack: Item, target: Item, deck: Item) -> bool {
+fn buffoon_pack_has_joker(
+    state: &mut SearchState,
+    pack: Item,
+    target: Item,
+    target_pools: u8,
+    base_locks: &Locks,
+) -> bool {
     let info = pack_info(pack);
-    let target_pools = target_joker_pools(target);
-    let mut locks = Locks::for_deck(deck);
-    let mut generated = [Item::RETRY; 5];
-    for slot in 0..info.size {
-        let joker = next_joker_item_with_locks(state, JokerSource::Buffoon, target_pools, &locks);
+    let mut locks = base_locks.clone();
+    for _ in 0..info.size {
+        let joker = next_joker_item(state, JokerSource::Buffoon, target_pools, &locks);
         if joker == target {
             return true;
         }
         locks.lock(joker);
-        generated[slot] = joker;
-    }
-    for joker in generated.into_iter().take(info.size) {
-        locks.unlock(joker);
     }
     false
 }
 
-fn count_souls_in_pack(state: &mut SearchState, pack: Item, deck: Item) -> u8 {
+fn pack_contains_soul(state: &mut SearchState, pack: Item, base_locks: &Locks) -> bool {
     let info = pack_info(pack);
-    let mut locks = Locks::for_deck(deck);
-    let mut generated = [Item::RETRY; 5];
-    let mut count = 0_u8;
-    for slot in 0..info.size {
+    let mut locks = base_locks.clone();
+    for _ in 0..info.size {
         let item = if is_arcana_pack(pack) {
-            next_tarot(state, &locks)
+            next_tarot_soul_candidate(state, &locks)
         } else if is_spectral_pack(pack) {
-            next_spectral(state, &locks)
+            next_spectral_soul_candidate(state, &locks)
         } else {
             Item::RETRY
         };
         if item == Item::The_Soul {
-            count += 1;
+            return true;
         }
-        locks.lock(item);
-        generated[slot] = item;
+        if item != Item::RETRY {
+            locks.lock(item);
+        }
     }
-    for item in generated.into_iter().take(info.size) {
-        locks.unlock(item);
-    }
-    count
+    false
 }
 
-fn next_tarot(state: &mut SearchState, locks: &Locks) -> Item {
+fn spectral_pack_contains_soul(state: &mut SearchState, size: usize, locks: &Locks) -> bool {
+    let soul_locked = locks.is_locked(Item::The_Soul);
+    let mut black_hole_locked = locks.is_locked(Item::Black_Hole);
+    for _ in 0..size {
+        let mut item = Item::RETRY;
+        if !soul_locked
+            && state
+                .rng
+                .random(RngKey::SoulSpectral1, &mut state.seed, state.hashed_seed)
+                > 0.997
+        {
+            item = Item::The_Soul;
+        }
+        if !black_hole_locked
+            && state
+                .rng
+                .random(RngKey::SoulSpectral1, &mut state.seed, state.hashed_seed)
+                > 0.997
+        {
+            item = Item::Black_Hole;
+        }
+        match item {
+            Item::The_Soul => return true,
+            Item::Black_Hole => black_hole_locked = true,
+            _ => {},
+        }
+    }
+    false
+}
+
+fn next_tarot_soul_candidate(state: &mut SearchState, locks: &Locks) -> Item {
     if !locks.is_locked(Item::The_Soul)
         && state
             .rng
@@ -419,10 +504,10 @@ fn next_tarot(state: &mut SearchState, locks: &Locks) -> Item {
     {
         return Item::The_Soul;
     }
-    randchoice(state, RngKey::TarotArcana1, TAROT_POOL, locks)
+    Item::RETRY
 }
 
-fn next_spectral(state: &mut SearchState, locks: &Locks) -> Item {
+fn next_spectral_soul_candidate(state: &mut SearchState, locks: &Locks) -> Item {
     let mut forced = Item::RETRY;
     if !locks.is_locked(Item::The_Soul)
         && state
@@ -440,19 +525,11 @@ fn next_spectral(state: &mut SearchState, locks: &Locks) -> Item {
     {
         forced = Item::Black_Hole;
     }
-    if forced != Item::RETRY {
-        return forced;
-    }
-    randchoice(state, RngKey::SpectralPack1, SPECTRAL_POOL, locks)
+    forced
 }
 
-fn soul_yields_perkeo(state: &mut SearchState, deck: Item) -> bool {
-    randchoice(
-        state,
-        RngKey::JokerLegendary,
-        LEGENDARY_JOKER_POOL,
-        &Locks::for_deck(deck),
-    ) == Item::Perkeo
+fn soul_yields_perkeo(state: &mut SearchState, locks: &Locks) -> bool {
+    randchoice(state, RngKey::JokerLegendary, LEGENDARY_JOKER_POOL, locks) == Item::Perkeo
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -462,15 +539,6 @@ enum JokerSource {
 }
 
 fn next_joker_item(
-    state: &mut SearchState,
-    source: JokerSource,
-    target_pools: u8,
-    deck: Item,
-) -> Item {
-    next_joker_item_with_locks(state, source, target_pools, &Locks::for_deck(deck))
-}
-
-fn next_joker_item_with_locks(
     state: &mut SearchState,
     source: JokerSource,
     target_pools: u8,
@@ -584,38 +652,6 @@ fn randchoice_tag(state: &mut SearchState) -> Item {
         let candidate = TAG_POOL[idx];
         resample += 1;
         if !is_ante1_locked_tag(candidate) || resample > 1000 {
-            return candidate;
-        }
-    }
-}
-
-fn randchoice_unlocked(state: &mut SearchState, key: RngKey, items: &[Item]) -> Item {
-    let idx = state.rng.randint(
-        key,
-        &mut state.seed,
-        state.hashed_seed,
-        0,
-        items.len() as i32 - 1,
-    ) as usize;
-    let item = items[idx];
-    if item != Item::RETRY {
-        return item;
-    }
-
-    let base = key.name();
-    let mut resample = 2;
-    loop {
-        let resample_key = format!("{base}_resample{resample}");
-        let idx = state.rng.randint_dynamic(
-            &resample_key,
-            &mut state.seed,
-            state.hashed_seed,
-            0,
-            items.len() as i32 - 1,
-        ) as usize;
-        let candidate = items[idx];
-        resample += 1;
-        if candidate != Item::RETRY || resample > 1000 {
             return candidate;
         }
     }

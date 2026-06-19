@@ -238,7 +238,7 @@ rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
 harness="$IMMO_DIR/target/$rust_target/release/immolate_dll_harness.exe"
 bench_case="${BENCH_CASE:-all}"
 bench_budget="${BENCH_BUDGET:-1000000}"
-bench_threads="${BENCH_THREADS:-1}"
+bench_threads="${BENCH_THREADS:-0}"
 bench_repeat="${BENCH_REPEAT:-5}"
 bench_warmup="${BENCH_WARMUP:-1}"
 bench_format="${BENCH_FORMAT:-pretty}"
@@ -268,10 +268,10 @@ rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
 harness="$IMMO_DIR/target/$rust_target/release/immolate_dll_harness.exe"
 bench_case="${BENCH_CASE:-all}"
 bench_budget="${BENCH_BUDGET:-1000000}"
-bench_threads="${BENCH_THREADS:-1}"
+bench_threads="${BENCH_THREADS:-0}"
 bench_repeat="${BENCH_REPEAT:-5}"
 bench_warmup="${BENCH_WARMUP:-1}"
-bench_min_ratio="${BENCH_MIN_RATIO:-0.0}"
+bench_min_ratio="${BENCH_MIN_RATIO:-1.0}"
 bench_fail_on_mismatch="${BENCH_FAIL_ON_MISMATCH:-0}"
 bench_format="${BENCH_FORMAT:-pretty}"
 bench_color="${BENCH_COLOR:-auto}"
@@ -308,15 +308,15 @@ BENCH_CASE=all \
 BENCH_BUDGET=100000 \
 BENCH_REPEAT=5 \
 BENCH_WARMUP=2 \
-BENCH_THREADS=1 \
+BENCH_THREADS=0 \
 BENCH_FORMAT=tsv \
 BENCH_COLOR=never \
-BENCH_MIN_RATIO=0.0 \
+BENCH_MIN_RATIO=1.0 \
 mise run bench-compare
 '''
 
 [tasks.bench-ux]
-description = "Actual Lua UI UX benchmark report"
+description = "DLL UX-fixture benchmark report using UI-reachable cases"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -327,12 +327,12 @@ BENCH_WARMUP=2 \
 BENCH_THREADS=0 \
 BENCH_FORMAT=tsv \
 BENCH_COLOR=never \
-BENCH_MIN_RATIO=0.0 \
+BENCH_MIN_RATIO=1.0 \
 mise run bench-compare
 '''
 
 [tasks.bench-pretty]
-description = "Full-suite pretty benchmark dashboard"
+description = "Full-suite human-readable benchmark report"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -340,10 +340,10 @@ BENCH_CASE=all \
 BENCH_BUDGET=1000000 \
 BENCH_REPEAT=7 \
 BENCH_WARMUP=2 \
-BENCH_THREADS=1 \
+BENCH_THREADS=0 \
 BENCH_FORMAT=pretty \
 BENCH_COLOR=always \
-BENCH_MIN_RATIO=0.0 \
+BENCH_MIN_RATIO=1.0 \
 mise run bench-compare
 '''
 
@@ -371,7 +371,7 @@ smoke_bench() {
     --dll "$(winepath -w "$(readlink -f "$rust_artifact")")" \
     --case "$bench_case" \
     --budget "$bench_budget" \
-    --threads "${BENCH_THREADS:-1}" \
+    --threads "${BENCH_THREADS:-0}" \
     --repeat 1 \
     --warmup "${BENCH_WARMUP:-1}" \
     --format "${BENCH_FORMAT:-pretty}" \

@@ -1,13 +1,10 @@
 -- Brainstorm UI Module
--- Provides the settings interface and configuration callbacks
 -- Created by OceanRamen. Rewrite by KRVH. Immolate DLL by MathIsFun0.
 
--- Performance: Cache frequently used functions
 local ipairs = ipairs
 local pairs = pairs
 local string_lower = string.lower
 
--- Tag definitions mapping display names to internal IDs
 -- Note: "Speed Tag" is internally called "tag_skip" in Balatro
 local tag_list = {
   ["None"] = "",
@@ -28,7 +25,6 @@ local tag_list = {
   ["D6 Tag"] = "tag_d_six",
 }
 
--- Voucher definitions for first shop filtering
 local voucher_list = {
   ["None"] = "",
   ["Overstock"] = "v_overstock_norm",
@@ -49,8 +45,6 @@ local voucher_list = {
   ["Paint Brush"] = "v_paint_brush",
 }
 
--- Pack definitions for first pack filtering
--- Each pack type can have multiple internal variants
 local pack_list = {
   ["None"] = {},
   ["Normal Arcana"] = {
@@ -124,6 +118,36 @@ local joker_location_keys = {
   "In Buffoon Packs",
 }
 
+local first_shop_impossible_joker_names = {
+  ["Steel Joker"] = true,
+  ["Stone Joker"] = true,
+  ["Lucky Cat"] = true,
+  ["Golden Ticket"] = true,
+  ["Glass Joker"] = true,
+  Cavendish = true,
+  Caino = true,
+  Canio = true,
+  Triboulet = true,
+  Yorick = true,
+  Chicot = true,
+  Perkeo = true,
+}
+
+local function is_searchable_joker_center(center)
+  if not center or center.set ~= "Joker" or not center.name then
+    return false
+  end
+  if
+    center.rarity == 4
+    or center.enhancement_gate
+    or center.yes_pool_flag
+    or first_shop_impossible_joker_names[center.name]
+  then
+    return false
+  end
+  return true
+end
+
 local function rebuild_joker_options()
   joker_list = { ["None"] = "" }
   joker_keys = { "None" }
@@ -142,7 +166,9 @@ local function rebuild_joker_options()
   search = search:gsub("^%s+", ""):gsub("%s+$", "")
   local has_search = search ~= ""
   for _, center in ipairs(pool) do
-    if center and center.name and joker_list[center.name] == nil then
+    if
+      is_searchable_joker_center(center) and joker_list[center.name] == nil
+    then
       local name = center.name
       if (not has_search) or string_lower(name):find(search, 1, true) then
         joker_list[name] = name
@@ -166,8 +192,6 @@ end
 local spf_list = Brainstorm.SPF_LIST
 local spf_keys = Brainstorm.SPF_KEYS
 
--- Suit ratio options for Erratic deck filtering
--- Represents minimum percentage of cards in top 2 suits
 local ratio_list = Brainstorm.RATIO_MAP
 
 local ratio_keys =
@@ -270,41 +294,48 @@ local function location_index_for_value(value)
   return 1
 end
 
--- UI callback functions for settings changes
--- These are called when users modify settings in the Brainstorm tab
--- Cache references for better performance
 local config = Brainstorm.config
 local write_config = Brainstorm.write_config
 
--- Voucher selection callback
+local function clear_invalid_joker_selection()
+  if not (G and G.P_CENTER_POOLS and G.P_CENTER_POOLS.Joker) then
+    return false
+  end
+  if
+    config.ar_filters.joker_name ~= ""
+    and joker_list[config.ar_filters.joker_name] == nil
+  then
+    config.ar_filters.joker_name = ""
+    config.ar_filters.joker_id = 1
+    return true
+  end
+  return false
+end
+
 G.FUNCS.change_target_voucher = function(x)
   config.ar_filters.voucher_id = x.to_key
   config.ar_filters.voucher_name = voucher_list[x.to_val]
   write_config()
 end
 
--- Pack selection callback
 G.FUNCS.change_target_pack = function(x)
   config.ar_filters.pack_id = x.to_key
   config.ar_filters.pack = pack_list[x.to_val]
   write_config()
 end
 
--- First tag selection callback
 G.FUNCS.change_target_tag = function(x)
   config.ar_filters.tag_id = x.to_key
   config.ar_filters.tag_name = tag_list[x.to_val]
   write_config()
 end
 
--- Second tag selection callback (for dual tag searches)
 G.FUNCS.change_target_tag2 = function(x)
   config.ar_filters.tag2_id = x.to_key
   config.ar_filters.tag2_name = tag_list[x.to_val]
   write_config()
 end
 
--- Joker selection callback
 G.FUNCS.change_search_joker = function(x)
   config.ar_filters.joker_id = x.to_key
   config.ar_filters.joker_name = joker_list[x.to_val] or ""
@@ -327,18 +358,13 @@ G.FUNCS.apply_joker_filter = function()
     search = tostring(search or "")
   end
   search = search:gsub("^%s+", ""):gsub("%s+$", "")
+  local changed = config.ar_filters.joker_search ~= search
   config.ar_filters.joker_search = search
   rebuild_joker_options()
-  if G and G.P_CENTER_POOLS and G.P_CENTER_POOLS.Joker then
-    if
-      config.ar_filters.joker_name ~= ""
-      and joker_list[config.ar_filters.joker_name] == nil
-    then
-      config.ar_filters.joker_name = ""
-      config.ar_filters.joker_id = 1
-    end
+  changed = clear_invalid_joker_selection() or changed
+  if changed then
+    write_config()
   end
-  write_config()
   refresh_brainstorm_tab()
 end
 
@@ -348,20 +374,17 @@ G.FUNCS.reset_brainstorm_settings = function()
   refresh_brainstorm_tab()
 end
 
--- Joker location callback
 G.FUNCS.change_search_joker_location = function(x)
   config.ar_filters.joker_location_id = x.to_key
   config.ar_filters.joker_location = joker_location_list[x.to_val] or "any"
   write_config()
 end
 
--- Soul skip count callback (number of shops with The Soul)
 G.FUNCS.change_soul_count = function(x)
   config.ar_filters.soul_skip = x.to_val
   write_config()
 end
 
--- Seeds per frame callback
 G.FUNCS.change_spf = function(x)
   local spf_key = tostring(x.to_val or "")
   local spf_value = spf_list[spf_key]
@@ -380,13 +403,11 @@ G.FUNCS.change_spf = function(x)
   write_config()
 end
 
--- Minimum face cards callback (for Erratic deck)
 G.FUNCS.change_face_count = function(x)
   config.ar_prefs.face_count = x.to_val
   write_config()
 end
 
--- Suit ratio callback (for Erratic deck)
 G.FUNCS.change_suit_ratio = function(x)
   config.ar_prefs.suit_ratio_id = x.to_key
   config.ar_prefs.suit_ratio_percent = x.to_val
@@ -399,6 +420,9 @@ function Brainstorm.build_settings_tab()
     label = "Brainstorm",
     tab_definition_function = function()
       rebuild_joker_options()
+      if clear_invalid_joker_selection() then
+        write_config()
+      end
       local joker_option =
         clamp_index(config.ar_filters.joker_id or 1, #joker_keys)
       if
@@ -600,7 +624,6 @@ function Brainstorm.build_settings_tab()
                 w = 4,
                 options = (function()
                   local opts = {}
-                  -- UI max is 35; 32+ is extremely rare (untested).
                   for i = 0, 35 do
                     opts[#opts + 1] = i
                   end
@@ -659,12 +682,9 @@ local function has_brainstorm_tab(tabs)
   return false
 end
 
--- Hook into the game's settings tab creation
--- Adds the Brainstorm tab to the settings menu
 if not Brainstorm._ui_hooks.create_tabs then
   Brainstorm._ui_hooks.create_tabs = create_tabs
   function create_tabs(args)
-    -- Check if this is the main settings tabs (tab_h == 7.05)
     if
       args
       and args.tab_h == 7.05

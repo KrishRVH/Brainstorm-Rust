@@ -13,9 +13,16 @@ historical DLL and reports comparable result mismatches. It skips fixtures the
 older ABI cannot represent, and it normalizes Original DLL hits that land beyond
 the selected `BENCH_BUDGET` to `<null>` before comparison.
 
-Keep `BENCH_THREADS=1` for implementation comparisons. Use `BENCH_THREADS=0`
-when measuring Lua auto-reroll UX, because the Lua UI passes `threads=0` to the
-DLL.
+Use `BENCH_THREADS=0` for user-facing comparisons and UX reports. That is the
+Lua auto-reroll call path, so it measures what players actually experience.
+Use `BENCH_THREADS=1` only as a single-thread kernel diagnostic; it is not the
+user-facing speed claim.
+
+`mise run bench-ux` is a DLL-level UX-fixture report. It uses UI-reachable
+filters and Lua-style thread selection, but it does not time in-game Lua work
+such as config reads, seed-start generation, FFI argument setup, status text
+updates, or Balatro frame scheduling. For true Lua wall time, profile
+`Brainstorm.auto_reroll()` in game.
 
 ## Canonical Commands
 
@@ -47,7 +54,7 @@ Run the full benchmark catalog:
 mise run bench-full
 ```
 
-Run the actual Lua UI UX report:
+Run the DLL UX-fixture report:
 
 ```bash
 mise run bench-ux
@@ -89,8 +96,8 @@ The mise tasks read these environment variables:
 - `BENCH_BUDGET=1000000`
 - `BENCH_REPEAT=5`
 - `BENCH_WARMUP=1`
-- `BENCH_THREADS=1`
-- `BENCH_MIN_RATIO=0.0`
+- `BENCH_THREADS=0`
+- `BENCH_MIN_RATIO=1.0`
 - `BENCH_FAIL_ON_MISMATCH=0`
 - `BENCH_FORMAT=pretty|tsv`
 - `BENCH_COLOR=auto|always|never`
@@ -103,9 +110,9 @@ The mise tasks read these environment variables:
 looking for meaningful regressions. `BENCH_WARMUP` controls discarded warmup
 calls before the measured samples.
 
-`BENCH_MIN_RATIO=0.0` disables the speed threshold. Set `BENCH_MIN_RATIO` above
-zero when you want the harness to fail if measured Rust/original speedup falls
-below that threshold.
+`BENCH_MIN_RATIO=1.0` makes the harness fail if any comparable user-facing
+Rust/original speedup drops below parity. Set `BENCH_MIN_RATIO=0.0` only when
+you want a diagnostic report without a speed gate.
 
 `BENCH_FAIL_ON_MISMATCH=0` keeps Rust/original result differences report-only,
 which is the default because the Original DLL is a historical performance
@@ -113,11 +120,11 @@ baseline and its ABI/semantics do not cover every current Brainstorm behavior.
 Set `BENCH_FAIL_ON_MISMATCH=1` only when intentionally auditing a fixture that
 should still match the legacy DLL.
 
-## Pretty Dashboard
+## Pretty Report
 
-`BENCH_FORMAT=pretty` is the default. When stdout is an interactive terminal,
-the harness shows a live status line for the active DLL call with elapsed time.
-The final report excludes rendering time and includes:
+`BENCH_FORMAT=pretty` is the default. The human report is intentionally plain:
+compact tables, optional ANSI color, and no terminal art or sparklines. It
+includes:
 
 - per-case Rust and original throughput where available
 - skipped original measurements for unsupported older-ABI fixtures
@@ -126,10 +133,9 @@ The final report excludes rendering time and includes:
 - mean latency, p50/p95/p99 latency, min/max latency, and stdev
 - `ns/seed`, which is often the clearest hot-path metric
 - coefficient of variation (`cv`) to flag noisy measurements
-- per-run sparklines for Rust and original sample stability
 - Rust/original speedup ratio
 - geometric-mean speedups per profiling group
-- ranked Rust ahead/behind sections with fixture notes
+- a potential-regressions section when Rust is slower than the target ratio
 - a high-variance section when either measured implementation has CV above 5%
 
 Use `BENCH_COLOR=always` when piping through a terminal renderer that preserves
@@ -148,7 +154,9 @@ helper.
   shop and Buffoon pack paths.
 - `pack-miss`, `souls-arcana`, `perkeo`: Soul counting and legendary-pool paths.
 - `erratic`, `erratic-suit`: Erratic Deck opening-card filters.
-- `ux-*`: UI-reachable combinations derived from the Lua controls.
+- `ux-*`: UI-reachable combinations derived from the Lua controls, including
+  no-pack Joker searches, Soul+Perkeo pack searches, and harder Erratic suit
+  filters.
 
 No-match/full-budget cases are the most useful for raw throughput. Early-hit
 cases are still valuable because they catch overhead, result handling, and
@@ -194,7 +202,7 @@ use the native helper. It runs only the Rust implementation.
 
 ```bash
 cargo run --manifest-path Immolate/Cargo.toml --release --bin brainstorm_bench -- \
-  --case all --budget 1000000 --threads 1 --repeat 5
+  --case all --budget 1000000 --threads 0 --repeat 5
 ```
 
 For UI-style profiling:
@@ -204,12 +212,17 @@ cargo run --manifest-path Immolate/Cargo.toml --release --bin brainstorm_bench -
   --case ux --budget 100000 --threads 0 --repeat 5 --warmup 2
 ```
 
+Useful exact UX cases include `ux-pack-joker-no-pack`,
+`ux-any-joker-no-pack`, `ux-soul-perkeo-arcana`,
+`ux-soul-perkeo-spectral`, `ux-erratic-suit-85`,
+`ux-erratic-no-faces-suit`, and `ux-erratic-tag-suit`.
+
 ## Agent Workflow
 
 Before changing hot-path code:
 
 1. Run `mise run check-rust`.
-2. Run the complete dashboard with `BENCH_CASE=all`,
+2. Run the complete report with `BENCH_CASE=all`,
    `BENCH_BUDGET=1000000`, `BENCH_REPEAT=7`, and `BENCH_WARMUP=2`.
 3. Run the UX report with `BENCH_CASE=ux`, `BENCH_BUDGET=100000`, and
    `BENCH_THREADS=0`.

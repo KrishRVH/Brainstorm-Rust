@@ -371,6 +371,7 @@ pub fn parse_joker_name(name: &str) -> Item {
     }
     let item = match name {
         "j_caino" | "j_canio" => Item::Canio,
+        "Caino" | "Canio" => Item::Canio,
         "j_seance" | "Seance" => Item::Seance,
         _ => Item::RETRY,
     };

@@ -836,6 +836,22 @@ Primary sources: all files listed above.
   yields Perkeo; it does not need to simulate Perkeo's later copying effect.
   Sources: `card.lua` (`Card:use_consumeable`, `Card:calculate_joker`);
   current Rust implementation.
+- Native first-shop filters reject impossible requests before scanning. This
+  includes ante-1 locked tags, voucher upgrades without their prerequisite
+  voucher, Observatory with a non-Telescope voucher target, Observatory on
+  Nebula Deck where Telescope is already active, Soul counts above one, pack
+  Joker searches constrained to non-Buffoon packs, and Erratic requirements that
+  cannot fit a 52-card opening deck. Sources: `game.lua` (`Game:start_run`);
+  `back.lua` (`Back:apply_to_run`); `functions/common_events.lua`
+  (`get_current_pool`, `get_next_voucher_key`, `get_pack`, `create_card`);
+  current Rust implementation.
+- Direct Joker search only targets Jokers that can appear in first-shop shop
+  slots or Buffoon packs. Legendary/Soul-only Jokers, `enhancement_gate` Jokers,
+  `yes_pool_flag` Jokers, and source-locked first-shop pool targets are hidden
+  from the Lua selector and rejected by native target-pool classification.
+  Sources: `game.lua` (`P_CENTERS`, `P_JOKER_RARITY_POOLS`);
+  `functions/common_events.lua` (`get_current_pool`, `create_card`);
+  current Rust implementation.
 - Future optimized native implementations should preserve the current shipped
   Rust behavior by default, and only switch to source-correct expanded behavior
   behind explicit tests and UI contract changes.

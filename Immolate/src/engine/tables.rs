@@ -1,12 +1,13 @@
 use crate::item::{
-    CARDS, COMMON_JOKERS, ITEM_COUNT, Item, LEGENDARY_JOKERS, PACKS, Pack, RARE_JOKERS, SPECTRALS,
-    TAGS, TAROTS, UNCOMMON_JOKERS, VOUCHERS, WeightedItem,
+    COMMON_JOKERS, ITEM_COUNT, Item, LEGENDARY_JOKERS, PACKS, Pack, RARE_JOKERS, SPECTRALS, TAGS,
+    TAROTS, UNCOMMON_JOKERS, VOUCHERS, WeightedItem,
 };
 
 pub const POOL_COMMON: u8 = 1 << 0;
 pub const POOL_UNCOMMON: u8 = 1 << 1;
 pub const POOL_RARE: u8 = 1 << 2;
 pub const POOL_LEGENDARY: u8 = 1 << 3;
+pub const STANDARD_JOKER_POOLS: u8 = POOL_COMMON | POOL_UNCOMMON | POOL_RARE;
 
 pub const TAG_POOL: &[Item] = &TAGS;
 pub const VOUCHER_POOL: &[Item] = &VOUCHERS;
@@ -108,6 +109,12 @@ impl Locks {
         ] {
             self.lock(item);
         }
+        for pair in VOUCHER_POOL.chunks_exact(2) {
+            self.lock(pair[1]);
+        }
+        for item in FIRST_SHOP_BLOCKED_POOL_JOKERS {
+            self.lock(item);
+        }
     }
 
     fn activate_voucher(&mut self, voucher: Item) {
@@ -120,7 +127,38 @@ impl Locks {
     }
 }
 
+const FIRST_SHOP_BLOCKED_POOL_JOKERS: [Item; 6] = [
+    Item::Cavendish,
+    Item::Steel_Joker,
+    Item::Stone_Joker,
+    Item::Lucky_Cat,
+    Item::Golden_Ticket,
+    Item::Glass_Joker,
+];
+
+const FIRST_SHOP_IMPOSSIBLE_TARGET_JOKERS: [Item; 11] = [
+    Item::Cavendish,
+    Item::Steel_Joker,
+    Item::Stone_Joker,
+    Item::Lucky_Cat,
+    Item::Golden_Ticket,
+    Item::Glass_Joker,
+    Item::Canio,
+    Item::Triboulet,
+    Item::Yorick,
+    Item::Chicot,
+    Item::Perkeo,
+];
+
+pub fn is_first_shop_possible_joker(target: Item) -> bool {
+    !FIRST_SHOP_IMPOSSIBLE_TARGET_JOKERS.contains(&target)
+}
+
 pub fn target_joker_pools(target: Item) -> u8 {
+    if !is_first_shop_possible_joker(target) {
+        return 0;
+    }
+
     let mut pools = 0;
     if COMMON_JOKERS.contains(&target) {
         pools |= POOL_COMMON;
@@ -227,8 +265,8 @@ pub fn shop_item_type(rates: ShopRates, mut poll: f64) -> Item {
 }
 
 pub fn card_face_and_suit(index: usize) -> (bool, usize) {
-    let rank_idx = (CARDS[index].idx() - Item::C_2.idx()) % 13;
-    let suit_idx = (CARDS[index].idx() - Item::C_2.idx()) / 13;
+    let rank_idx = index % 13;
+    let suit_idx = index / 13;
     let is_face = matches!(rank_idx, 9..=11);
     (is_face, suit_idx)
 }

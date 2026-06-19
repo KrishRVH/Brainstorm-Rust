@@ -20,13 +20,10 @@ mod windows_harness {
     use std::cmp::Ordering as CmpOrdering;
     use std::env;
     use std::ffi::{CStr, CString, OsStr};
-    use std::io::{self, IsTerminal, Write};
+    use std::io::{self, IsTerminal};
     use std::os::raw::{c_char, c_double, c_int, c_longlong, c_void};
     use std::os::windows::ffi::OsStrExt;
     use std::ptr;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-    use std::thread;
     use std::time::{Duration, Instant};
 
     use immolate::seed::{SEED_SPACE, Seed};
@@ -450,10 +447,6 @@ mod windows_harness {
                 ColorMode::Auto => io::stdout().is_terminal(),
             }
         }
-
-        fn animate(self) -> bool {
-            self.format == OutputFormat::Pretty && io::stdout().is_terminal()
-        }
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -694,7 +687,6 @@ mod windows_harness {
         budget: i64,
         threads: i32,
         repeat: usize,
-        runs: Vec<BenchRun>,
         mean_elapsed: Duration,
         min_elapsed: Duration,
         max_elapsed: Duration,
@@ -738,21 +730,13 @@ mod windows_harness {
         implementation: &'static str,
         output: OutputOptions,
     ) -> Result<BenchSummary, String> {
-        run_warmups(dll, case, warmup, implementation, output)?;
+        run_warmups(dll, case, warmup)?;
         let mut runs = Vec::with_capacity(repeat);
         let mut scanned_counts = Vec::with_capacity(repeat);
         for run in 1..=repeat {
-            let status = format!(
-                "{implementation} {:<18} run {run}/{repeat}  budget {}  threads {}",
-                case.name,
-                format_integer(case.num_seeds),
-                case.threads,
-            );
-            let ticker = RunTicker::start(output.animate(), status, output.use_color());
             let started = Instant::now();
             let result = dll.run(case);
             let elapsed = started.elapsed();
-            ticker.finish();
             let mut result = result?;
             if implementation == "original" {
                 result = normalize_legacy_original_result(case, result);
@@ -805,7 +789,6 @@ mod windows_harness {
             budget: case.num_seeds,
             threads: case.threads,
             repeat,
-            runs,
             mean_elapsed,
             min_elapsed,
             max_elapsed,
@@ -826,24 +809,9 @@ mod windows_harness {
         Ok(summary)
     }
 
-    fn run_warmups(
-        dll: &Dll,
-        case: &Case,
-        warmup: usize,
-        implementation: &str,
-        output: OutputOptions,
-    ) -> Result<(), String> {
-        for run in 1..=warmup {
-            let status = format!(
-                "{implementation} {:<18} warmup {run}/{warmup}  budget {}  threads {}",
-                case.name,
-                format_integer(case.num_seeds),
-                case.threads,
-            );
-            let ticker = RunTicker::start(output.animate(), status, output.use_color());
-            let result = dll.run(case);
-            ticker.finish();
-            result?;
+    fn run_warmups(dll: &Dll, case: &Case, warmup: usize) -> Result<(), String> {
+        for _ in 0..warmup {
+            dll.run(case)?;
         }
         Ok(())
     }
@@ -857,7 +825,7 @@ mod windows_harness {
                 let mut dll = None;
                 let mut case = "all".to_owned();
                 let mut budget = 1_000_000;
-                let mut threads = 1;
+                let mut threads = 0;
                 let mut repeat = 5;
                 let mut warmup = 1;
                 let mut output = OutputOptions::default();
@@ -911,10 +879,10 @@ mod windows_harness {
                 let mut original = None;
                 let mut case = "all".to_owned();
                 let mut budget = 1_000_000;
-                let mut threads = 1;
+                let mut threads = 0;
                 let mut repeat = 5;
                 let mut warmup = 1;
-                let mut min_ratio = 0.8;
+                let mut min_ratio = 1.0;
                 let mut fail_on_mismatch = false;
                 let mut output = OutputOptions::default();
                 parse_flags(&args[1..], |flag, value| match flag {
@@ -1217,67 +1185,11 @@ mod windows_harness {
         Duration::from_secs_f64(variance.sqrt())
     }
 
-    struct RunTicker {
-        enabled: bool,
-        stop: Arc<AtomicBool>,
-        handle: Option<thread::JoinHandle<()>>,
-    }
-
-    impl RunTicker {
-        fn start(enabled: bool, message: String, color: bool) -> Self {
-            let stop = Arc::new(AtomicBool::new(false));
-            if !enabled {
-                return Self {
-                    enabled,
-                    stop,
-                    handle: None,
-                };
-            }
-
-            let started = Instant::now();
-            let thread_stop = Arc::clone(&stop);
-            let handle = thread::spawn(move || {
-                const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-                let mut frame = 0_usize;
-                while !thread_stop.load(AtomicOrdering::Relaxed) {
-                    let spinner = paint(color, ANSI_CYAN, FRAMES[frame % FRAMES.len()]);
-                    print!(
-                        "\r\x1b[2K  {spinner} {message}  elapsed {}",
-                        format_status_duration(started.elapsed())
-                    );
-                    let _ = io::stdout().flush();
-                    frame += 1;
-                    thread::sleep(Duration::from_millis(90));
-                }
-            });
-
-            Self {
-                enabled,
-                stop,
-                handle: Some(handle),
-            }
-        }
-
-        fn finish(mut self) {
-            if !self.enabled {
-                return;
-            }
-            self.stop.store(true, AtomicOrdering::Relaxed);
-            if let Some(handle) = self.handle.take() {
-                let _ = handle.join();
-            }
-            print!("\r\x1b[2K");
-            let _ = io::stdout().flush();
-        }
-    }
-
     const ANSI_RESET: &str = "\x1b[0m";
     const ANSI_DIM: &str = "\x1b[2m";
     const ANSI_RED: &str = "\x1b[31m";
     const ANSI_GREEN: &str = "\x1b[32m";
     const ANSI_YELLOW: &str = "\x1b[33m";
-    const ANSI_BLUE: &str = "\x1b[34m";
-    const ANSI_CYAN: &str = "\x1b[36m";
 
     fn paint(enabled: bool, code: &str, text: &str) -> String {
         if enabled {
@@ -1289,12 +1201,9 @@ mod windows_harness {
 
     fn print_run_header(title: &str, settings: BenchSettings<'_>, case_count: usize) {
         let color = settings.output.use_color();
-        let rule = "═".repeat(78);
-        println!("{}", paint(color, ANSI_CYAN, &format!("╔{rule}╗")));
-        println!("{}", paint(color, ANSI_CYAN, &format!("║ {title:<76} ║")));
-        println!("{}", paint(color, ANSI_CYAN, &format!("╚{rule}╝")));
+        println!("{title}");
         println!(
-            "  case selector {:<14} budget {:>12}   repeats {:>3}   warmups {:>2}   threads {:>2}   cases {:>2}",
+            "case={} budget={} repeat={} warmup={} threads={} cases={}",
             settings.selected_case,
             format_integer(settings.budget),
             settings.repeat,
@@ -1306,16 +1215,6 @@ mod windows_harness {
             "  groups: {}",
             paint(color, ANSI_DIM, &bench::bench_group_keys().join(", "))
         );
-        if settings.output.animate() {
-            println!(
-                "  {}",
-                paint(
-                    color,
-                    ANSI_DIM,
-                    "live status shows the active DLL call and elapsed time; final numbers below exclude rendering"
-                )
-            );
-        }
         println!();
     }
 
@@ -1323,7 +1222,7 @@ mod windows_harness {
         let color = output.use_color();
         print_section("Case Summary", color);
         println!(
-            "{:<18} {:<9} {:<6} {:>7} {:>11} {:>9} {:>9} {:>10} {:>7} {:<12} samples",
+            "{:<18} {:<9} {:<6} {:>7} {:>11} {:>9} {:>9} {:>10} {:>7} {:<12}",
             "case",
             "group",
             "shape",
@@ -1335,7 +1234,7 @@ mod windows_harness {
             "cv",
             "result",
         );
-        println!("{}", paint(color, ANSI_DIM, &"─".repeat(126)));
+        println!("{}", paint(color, ANSI_DIM, &"-".repeat(111)));
         for summary in summaries {
             let cv = format!("{:.1}%", summary.coefficient_variation * 100.0);
             let cv = paint(
@@ -1344,7 +1243,7 @@ mod windows_harness {
                 &format!("{cv:>7}"),
             );
             println!(
-                "{:<18} {:<9} {:<6} {:>7} {:>11} {:>9.3} {:>9.3} {:>10} {} {:<12} {}",
+                "{:<18} {:<9} {:<6} {:>7} {:>11} {:>9.3} {:>9.3} {:>10} {} {:<12}",
                 summary.case_name,
                 summary.group.label(),
                 summary.shape.label(),
@@ -1355,7 +1254,6 @@ mod windows_harness {
                 format_ns(summary.ns_per_seed),
                 cv,
                 short_result(&summary.result, 12),
-                sparkline(&summary.runs),
             );
         }
     }
@@ -1368,7 +1266,7 @@ mod windows_harness {
         let color = output.use_color();
         print_section("Rust vs Original Brainstorm", color);
         println!(
-            "{:<18} {:<9} {:<6} {:>7} {:>11} {:>11} {:>11} {:>17} {:>17} {:>11} samples",
+            "{:<18} {:<9} {:<6} {:>7} {:>11} {:>11} {:>11} {:>17} {:>17} {:>11}",
             "case",
             "group",
             "shape",
@@ -1380,7 +1278,7 @@ mod windows_harness {
             "ns/seed R/O",
             "cv R/O",
         );
-        println!("{}", paint(color, ANSI_DIM, &"─".repeat(150)));
+        println!("{}", paint(color, ANSI_DIM, &"-".repeat(133)));
         for comparison in comparisons {
             if let Some(original) = &comparison.original {
                 let rust_ratio = comparison
@@ -1397,7 +1295,7 @@ mod windows_harness {
                     original.coefficient_variation * 100.0,
                 );
                 println!(
-                    "{:<18} {:<9} {:<6} {:>7} {:>11} {:>11} {} {:>17} {:>17} {:>11} R{} O{}",
+                    "{:<18} {:<9} {:<6} {:>7} {:>11} {:>11} {} {:>17} {:>17} {:>11}",
                     comparison.rust.case_name,
                     comparison.rust.group.label(),
                     comparison.rust.shape.label(),
@@ -1416,8 +1314,6 @@ mod windows_harness {
                         format_ns(original.ns_per_seed)
                     ),
                     cv_pair,
-                    sparkline(&comparison.rust.runs),
-                    sparkline(&original.runs),
                 );
             } else if let Some(reason) = comparison.original_skip {
                 println!(
@@ -1438,7 +1334,7 @@ mod windows_harness {
         }
         print_result_mismatch_report(comparisons, color);
         print_group_report(comparisons, min_ratio, color);
-        print_ranked_report(comparisons, min_ratio, color);
+        print_regression_report(comparisons, min_ratio, color);
         print_noise_report(comparisons, color);
     }
 
@@ -1480,10 +1376,10 @@ mod windows_harness {
     fn print_group_report(comparisons: &[BenchComparison], min_ratio: f64, color: bool) {
         print_section("Group Speedups", color);
         println!(
-            "{:<10} {:>5} {:>9} {:>12} {:<20} {:<20} meter",
-            "group", "cases", "measured", "gmean", "best", "worst",
+            "{:<10} {:>8} {:>12} {:<24} {:<24}",
+            "group", "measured", "gmean", "best", "worst",
         );
-        println!("{}", paint(color, ANSI_DIM, &"─".repeat(98)));
+        println!("{}", paint(color, ANSI_DIM, &"-".repeat(86)));
         for group in bench_group_order() {
             let group_comparisons: Vec<_> = comparisons
                 .iter()
@@ -1511,10 +1407,8 @@ mod windows_harness {
                 }
             }
             println!(
-                "{:<10} {:>5} {:>4}/{:<4} {} {:<20} {:<20} {}",
+                "{:<10} {:>8} {} {:<24} {:<24}",
                 group.label(),
-                group_comparisons.len(),
-                group_comparisons.len(),
                 group_comparisons.len(),
                 paint(
                     color,
@@ -1531,18 +1425,18 @@ mod windows_harness {
                     worst.rust.case_name,
                     worst.rust_vs_original_ratio().expect("measured original")
                 ),
-                ratio_meter(gmean, color),
             );
         }
     }
 
-    fn print_ranked_report(comparisons: &[BenchComparison], min_ratio: f64, color: bool) {
+    fn print_regression_report(comparisons: &[BenchComparison], min_ratio: f64, color: bool) {
+        let threshold = min_ratio.max(1.0);
         let mut behind: Vec<_> = comparisons
             .iter()
             .filter(|comparison| {
                 comparison
                     .rust_vs_original_ratio()
-                    .is_some_and(|ratio| ratio < 1.0)
+                    .is_some_and(|ratio| ratio < threshold)
             })
             .collect();
         behind.sort_by(|a, b| {
@@ -1552,61 +1446,32 @@ mod windows_harness {
                 .unwrap_or(CmpOrdering::Equal)
         });
 
-        print_section("Rust Behind Original", color);
         if behind.is_empty() {
-            println!("  none in this selection");
-        } else {
-            for comparison in behind.iter().take(5) {
-                let rust_ratio = comparison
-                    .rust_vs_original_ratio()
-                    .expect("measured original");
-                let ratio = paint(
-                    color,
-                    ratio_color(rust_ratio, min_ratio),
-                    &format!("{rust_ratio:.3}x"),
-                );
-                println!(
-                    "  {:<18} {:>11}  Original faster by {:>6.1}%  {}",
-                    comparison.rust.case_name,
-                    ratio,
-                    (1.0 - rust_ratio) * 100.0,
-                    paint(color, ANSI_DIM, comparison.rust.note),
-                );
-            }
+            return;
         }
 
-        let mut ahead: Vec<_> = comparisons
-            .iter()
-            .filter(|comparison| {
-                comparison
-                    .rust_vs_original_ratio()
-                    .is_some_and(|ratio| ratio >= 1.0)
-            })
-            .collect();
-        ahead.sort_by(|a, b| {
-            b.rust_vs_original_ratio()
-                .expect("measured original")
-                .partial_cmp(&a.rust_vs_original_ratio().expect("measured original"))
-                .unwrap_or(CmpOrdering::Equal)
-        });
-
-        print_section("Rust Ahead Original", color);
-        if ahead.is_empty() {
-            println!("  none in this selection");
-        } else {
-            for comparison in ahead.iter().take(5) {
-                let rust_ratio = comparison
-                    .rust_vs_original_ratio()
-                    .expect("measured original");
-                let ratio = paint(color, ANSI_GREEN, &format!("{rust_ratio:.3}x"));
-                println!(
-                    "  {:<18} {:>11}  Rust faster by {:>6.1}%  {}",
-                    comparison.rust.case_name,
-                    ratio,
-                    (rust_ratio - 1.0) * 100.0,
-                    paint(color, ANSI_DIM, comparison.rust.note),
-                );
-            }
+        print_section("Potential Regressions", color);
+        println!(
+            "{:<18} {:>11} {:>13} note",
+            "case", "rust/orig", "original faster",
+        );
+        println!("{}", paint(color, ANSI_DIM, &"-".repeat(76)));
+        for comparison in behind.iter().take(8) {
+            let rust_ratio = comparison
+                .rust_vs_original_ratio()
+                .expect("measured original");
+            let ratio = paint(
+                color,
+                ratio_color(rust_ratio, threshold),
+                &format!("{rust_ratio:.3}x"),
+            );
+            println!(
+                "{:<18} {:>11} {:>12.1}% {}",
+                comparison.rust.case_name,
+                ratio,
+                (1.0 - rust_ratio) * 100.0,
+                paint(color, ANSI_DIM, comparison.rust.note),
+            );
         }
     }
 
@@ -1667,10 +1532,8 @@ mod windows_harness {
 
     fn print_section(title: &str, color: bool) {
         println!();
-        println!(
-            "{}",
-            paint(color, ANSI_BLUE, &format!("╭─ {title} {}", "─".repeat(60)))
-        );
+        println!("{}", paint(color, ANSI_DIM, title));
+        println!("{}", paint(color, ANSI_DIM, &"-".repeat(title.len())));
     }
 
     fn print_tsv_header() {
@@ -1815,49 +1678,8 @@ mod windows_harness {
         }
     }
 
-    fn ratio_meter(ratio: f64, color: bool) -> String {
-        const WIDTH: usize = 18;
-        let normalized = ((ratio.log2() + 1.0) / 2.0).clamp(0.0, 1.0);
-        let filled = (normalized * WIDTH as f64).round() as usize;
-        let meter = format!("{}{}", "█".repeat(filled), "░".repeat(WIDTH - filled));
-        paint(color, ratio_color(ratio, 1.0), &meter)
-    }
-
-    fn sparkline(runs: &[BenchRun]) -> String {
-        const LEVELS: &[&str] = &["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
-        if runs.is_empty() {
-            return String::new();
-        }
-        if runs.len() == 1 {
-            return "▅".to_owned();
-        }
-        let values: Vec<_> = runs.iter().map(|run| run.elapsed.as_secs_f64()).collect();
-        let min = values.iter().copied().fold(f64::INFINITY, f64::min);
-        let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        if (max - min).abs() < f64::EPSILON {
-            return "▅".repeat(values.len());
-        }
-        values
-            .iter()
-            .map(|value| {
-                let idx =
-                    (((*value - min) / (max - min)) * (LEVELS.len() - 1) as f64).round() as usize;
-                LEVELS[idx.min(LEVELS.len() - 1)]
-            })
-            .collect()
-    }
-
     fn ms(duration: Duration) -> f64 {
         duration.as_secs_f64() * 1000.0
-    }
-
-    fn format_status_duration(duration: Duration) -> String {
-        let millis = duration.as_millis();
-        if millis < 1_000 {
-            format!("{millis}ms")
-        } else {
-            format!("{:.1}s", duration.as_secs_f64())
-        }
     }
 
     fn format_rate(value: f64) -> String {

@@ -99,8 +99,6 @@ end
 
 Brainstorm.config = Brainstorm.config or Brainstorm.default_config()
 
--- Auto-reroll state management
--- Tracks the state of automatic seed rerolling
 Brainstorm.ar_timer = Brainstorm.ar_timer or 0
 Brainstorm.ar_frames = Brainstorm.ar_frames or 0
 Brainstorm.ar_text = Brainstorm.ar_text or nil
@@ -108,9 +106,9 @@ Brainstorm.ar_active = Brainstorm.ar_active or false
 Brainstorm.ar_last_error = Brainstorm.ar_last_error or nil
 Brainstorm.ar_seeds_scanned = Brainstorm.ar_seeds_scanned or 0
 Brainstorm.ar_status_text = Brainstorm.ar_status_text or "Rerolling..."
+Brainstorm.ar_status_last_update = Brainstorm.ar_status_last_update or 0
+Brainstorm.ar_status_last_scanned = Brainstorm.ar_status_last_scanned or -1
 
--- Static lookup tables for better performance
--- Avoids repeated string comparisons in hot loops
 Brainstorm.RATIO_MAP = {
   ["Disabled"] = 0,
   ["50%"] = 0.5,
@@ -122,27 +120,19 @@ Brainstorm.RATIO_MAP = {
   ["85%"] = 0.85,
 }
 
--- Constants
-Brainstorm.AR_INTERVAL = 0.01 -- Seconds between reroll attempts (100 Hz)
+Brainstorm.AR_INTERVAL = 0.01
+Brainstorm.AR_STATUS_INTERVAL = 0.15
 
--- Performance optimization: Cache frequently used functions
--- This avoids table lookups in hot code paths
 local string_lower = string.lower
 local pcall = pcall
-local get_time = love.timer.getTime
+local get_time = love and love.timer and love.timer.getTime
 
 local CONFIG_DIR_NAME = "Brainstorm"
 local CONFIG_FILE_NAME = "config.lua"
 
--- Random seed generation constants
--- Seed generation factors using prime-based constants for good distribution
--- These values minimize correlation between cursor position and generated seeds:
---   X factor (~1/3): Spreads horizontal mouse movement across seed space
---   Y factor (~7/8): Ensures vertical movement contributes strongly
---   Time factor (~2/5): Incorporates temporal variation for entropy
-local SEED_X_FACTOR = 0.33411983 -- Prime-derived for X axis distribution
-local SEED_Y_FACTOR = 0.874146 -- Prime-derived for Y axis spread
-local SEED_TIME_FACTOR = 0.412311010 -- Prime-derived for time entropy
+local SEED_X_FACTOR = 0.33411983
+local SEED_Y_FACTOR = 0.874146
+local SEED_TIME_FACTOR = 0.412311010
 
 local function build_seed_start()
   local seed_input = get_time() * SEED_TIME_FACTOR
@@ -371,8 +361,30 @@ local function format_count(value)
   return tostring(value or 0)
 end
 
-local function update_auto_reroll_status()
+local function current_time()
+  if type(get_time) == "function" then
+    local success, now = pcall(get_time)
+    if success and type(now) == "number" then
+      return now
+    end
+  end
+  return os.clock()
+end
+
+local function update_auto_reroll_status(force)
   local scanned = Brainstorm.ar_seeds_scanned or 0
+  local now = current_time()
+  if not force then
+    if Brainstorm.ar_status_last_scanned == scanned then
+      return
+    end
+    local interval = Brainstorm.AR_STATUS_INTERVAL or 0.15
+    if now - (Brainstorm.ar_status_last_update or 0) < interval then
+      return
+    end
+  end
+  Brainstorm.ar_status_last_update = now
+  Brainstorm.ar_status_last_scanned = scanned
   Brainstorm.ar_status_text = "Rerolling... scanned "
     .. format_count(scanned)
     .. " seeds"
@@ -394,39 +406,6 @@ local function current_seed_budget()
   end
   return nil
 end
-
-local function init_log_path()
-  if Brainstorm.LOG_PATH then
-    return
-  end
-  if Brainstorm.PATH then
-    Brainstorm.LOG_PATH = Brainstorm.PATH .. "/brainstorm.log"
-  elseif lovely and lovely.mod_dir then
-    Brainstorm.LOG_PATH = lovely.mod_dir .. "/Brainstorm/brainstorm.log"
-  else
-    Brainstorm.LOG_PATH = "brainstorm.log"
-  end
-  if not nfs.getInfo(Brainstorm.LOG_PATH) then
-    pcall(nfs.write, Brainstorm.LOG_PATH, "")
-  end
-end
-
-Brainstorm.init_log_path = init_log_path
-
-local function log_lua(message)
-  -- Logging disabled.
-  -- if not Brainstorm.LOG_PATH then
-  --   init_log_path()
-  -- end
-  -- if not Brainstorm.LOG_PATH then
-  --   return
-  -- end
-  -- local timestamp = os.date("%Y-%m-%d %H:%M:%S")
-  -- local line = timestamp .. " [Lua] " .. message .. "\n"
-  -- pcall(nfs.append, Brainstorm.LOG_PATH, line)
-end
-
-Brainstorm.log_lua = log_lua
 
 local function file_exists(file_path)
   if type(file_path) ~= "string" or file_path == "" then
@@ -495,9 +474,8 @@ local function show_auto_reroll_text()
     return
   end
   if not Brainstorm.ar_status_text or Brainstorm.ar_status_text == "" then
-    update_auto_reroll_status()
+    update_auto_reroll_status(true)
   end
-  -- log_lua("auto_reroll UI text shown")
   Brainstorm.ar_text = Brainstorm.attention_text({
     scale = 1.4,
     text = { { ref_table = Brainstorm, ref_value = "ar_status_text" } },
@@ -512,11 +490,9 @@ local function report_auto_reroll_error(message)
     return
   end
   Brainstorm.ar_last_error = message
-  -- log_lua("auto_reroll error: " .. message)
   Brainstorm.save_state_alert(message)
 end
 
--- Find the Brainstorm mod directory.
 local function find_brainstorm_directory(directory)
   if type(directory) ~= "string" or directory == "" then
     return nil
@@ -543,7 +519,6 @@ local function find_brainstorm_directory(directory)
   return nil
 end
 
--- Load configuration from file with backward compatibility.
 function Brainstorm.load_config()
   local config_path = Brainstorm.config_path()
   local config_file = config_path
@@ -588,7 +563,6 @@ function Brainstorm.write_config()
   if not config_path then
     return
   end
-  -- STR_PACK is a Balatro function for serializing Lua tables
   local success, packed = pcall(STR_PACK, Brainstorm.config)
   if success and packed then
     local write_success = nfs.write(config_path, packed)
@@ -604,38 +578,28 @@ function Brainstorm.init()
     return false
   end
   load_version_info()
-  -- init_log_path()
-  -- log_lua("init start")
-  -- log_lua("mod path=" .. Brainstorm.PATH .. " log path=" .. Brainstorm.LOG_PATH)
 
   Brainstorm.load_config()
-  -- log_lua("config loaded")
 
-  -- Load UI with error handling
   local ui_path = Brainstorm.PATH .. "/UI.lua"
   local ui_content = nfs.read(ui_path)
   if not ui_content then
-    -- log_lua("init failed: UI.lua missing")
     return false
   end
 
   local ui_func = load(ui_content)
   if not ui_func then
-    -- log_lua("init failed: UI.lua load error")
     return false
   end
 
-  local success, ui_err = pcall(ui_func)
+  local success = pcall(ui_func)
   if not success then
-    -- log_lua("init failed: UI.lua error " .. tostring(ui_err))
     return false
   end
-  -- log_lua("UI loaded")
 
   return true
 end
 
--- Save state functionality
 local save_state_keys = { "1", "2", "3", "4", "5" }
 
 function Brainstorm.save_state_alert(text)
@@ -719,16 +683,12 @@ function Brainstorm.load_game_state(slot)
   end
 end
 
--- Perform a single manual reroll
--- Preserves stake and challenge settings
 function Brainstorm.reroll()
-  -- log_lua("manual reroll triggered")
-  local G = G -- Cache global for slight performance gain
+  local G = G
   if not Brainstorm.is_enabled() or not is_run_stage() then
     return false
   end
 
-  -- Preserve game state for restart
   G.GAME.viewed_back = nil
   G.run_setup_seed = G.GAME.seeded
   G.challenge_tab = G.GAME and G.GAME.challenge and G.GAME.challenge_tab or nil
@@ -786,7 +746,9 @@ local function handle_brainstorm_keypress(key)
           Brainstorm.ar_active = true
           Brainstorm.ar_last_error = nil
           Brainstorm.ar_seeds_scanned = 0
-          update_auto_reroll_status()
+          Brainstorm.ar_status_last_update = 0
+          Brainstorm.ar_status_last_scanned = -1
+          update_auto_reroll_status(true)
           show_auto_reroll_text()
         end
       end)
@@ -859,32 +821,23 @@ if not Brainstorm._hooks.game_update then
   end
 end
 
--- Foreign Function Interface (FFI) for native DLL integration
--- The DLL provides high-performance seed filtering without game restarts
 local ffi_loaded = false
 local native_handle = nil
 local DLL_NAME = "Immolate.dll"
 
--- Initialize FFI definitions for DLL functions
 local function init_ffi()
   if not ffi_loaded then
     local success = pcall(
       ffi.cdef,
       [[
-      // Brainstorm seed search
       char* brainstorm_search(const char* seed_start, const char* voucher_key, const char* pack_key, const char* tag1_key, const char* tag2_key, const char* joker_name, const char* joker_location, double souls, bool observatory, bool perkeo, const char* deck_key, bool erratic, bool no_faces, int min_face_cards, double suit_ratio, long long num_seeds, int threads);
-      // Set native log path (optional)
-      void immolate_set_log_path(const char* path);
-      // Free memory allocated by DLL. Only pass pointers returned by brainstorm_search.
       void free_result(char* result);
     ]]
     )
     if not success then
-      -- log_lua("ffi cdef failed")
       return false
     end
     ffi_loaded = true
-    -- log_lua("ffi cdef loaded")
   end
   return true
 end
@@ -897,14 +850,12 @@ local function load_native()
   local dll_path = Brainstorm.PATH .. "/" .. DLL_NAME
   local dll_file = io.open(dll_path, "rb")
   if not dll_file then
-    -- log_lua("native load failed: missing " .. dll_path)
     return nil
   end
   dll_file:close()
 
   local success, handle = pcall(ffi.load, dll_path)
   if not success then
-    -- log_lua("native load failed: " .. tostring(handle))
     return nil
   end
 
@@ -915,7 +866,6 @@ local function load_native()
     return handle.free_result
   end)
   if not search_success or not search_fn or not free_success or not free_fn then
-    -- log_lua("native load failed: missing required exports")
     return nil
   end
 
@@ -924,20 +874,13 @@ local function load_native()
     brainstorm_search = search_fn,
     free_result = free_fn,
   }
-  -- log_lua("native loaded: " .. dll_path)
-  -- if handle.immolate_set_log_path and Brainstorm.LOG_PATH then
-  --   pcall(handle.immolate_set_log_path, Brainstorm.LOG_PATH)
-  -- end
   return native_handle
 end
 
--- Stop auto-reroll and clean up resources
 function Brainstorm.stop_auto_reroll()
-  -- log_lua("auto_reroll stop")
   Brainstorm.ar_active = false
   Brainstorm.ar_frames = 0
 
-  -- Remove UI text if present
   if Brainstorm.ar_text then
     Brainstorm.ar_text.cancelled = true
     if Brainstorm.ar_text.AT and not Brainstorm.ar_text.removing then
@@ -947,29 +890,22 @@ function Brainstorm.stop_auto_reroll()
   end
 end
 
--- Generate and test seeds using the native DLL
--- Returns a matching seed or nil if none found
 function Brainstorm.auto_reroll()
-  -- log_lua("auto_reroll begin")
   if not Brainstorm.is_enabled() or not is_run_stage() then
     return false, "Auto-reroll stopped (run unavailable)"
   end
 
   local seed_start = build_seed_start()
   if not seed_start then
-    -- log_lua("auto_reroll failed: seed generator unavailable")
     return false, "Auto-reroll stopped (seed generator unavailable)"
   end
-  -- log_lua("seed_start=" .. seed_start)
 
   if not init_ffi() then
-    -- log_lua("auto_reroll failed: ffi init")
     return false, "Auto-reroll stopped (FFI init failed)"
   end
 
   local immolate = load_native()
   if not immolate then
-    -- log_lua("auto_reroll failed: native load")
     return false, "Auto-reroll stopped (Immolate.dll missing)"
   end
 
@@ -1014,40 +950,6 @@ function Brainstorm.auto_reroll()
     return false, "Auto-reroll stopped (invalid seed budget)"
   end
 
-  -- log_lua(
-  --   "filters voucher="
-  --     .. as_string(Brainstorm.config.ar_filters.voucher_name)
-  --     .. " pack="
-  --     .. as_string(pack_key)
-  --     .. " tag1="
-  --     .. as_string(Brainstorm.config.ar_filters.tag_name)
-  --     .. " tag2="
-  --     .. as_string(Brainstorm.config.ar_filters.tag2_name)
-  --     .. " joker="
-  --     .. as_string(Brainstorm.config.ar_filters.joker_name)
-  --     .. " joker_location="
-  --     .. as_string(Brainstorm.config.ar_filters.joker_location)
-  --     .. " souls="
-  --     .. as_string(Brainstorm.config.ar_filters.soul_skip)
-  --     .. " observatory="
-  --     .. tostring(Brainstorm.config.ar_filters.inst_observatory)
-  --     .. " perkeo="
-  --     .. tostring(Brainstorm.config.ar_filters.inst_perkeo)
-  --     .. " deck="
-  --     .. as_string(deck_key)
-  --     .. " erratic="
-  --     .. tostring(erratic)
-  --     .. " no_faces="
-  --     .. tostring(no_faces)
-  --     .. " min_face_cards="
-  --     .. tostring(min_face_cards)
-  --     .. " suit_ratio="
-  --     .. tostring(suit_ratio)
-  --     .. " seed_budget="
-  --     .. tostring(seed_budget)
-  -- )
-
-  -- log_lua("calling brainstorm_search")
   local call_success, result = pcall(
     immolate.brainstorm_search,
     seed_start,
@@ -1069,7 +971,6 @@ function Brainstorm.auto_reroll()
     0
   )
   if not call_success then
-    -- log_lua("brainstorm_search failed: " .. tostring(result))
     return false,
       "Auto-reroll stopped (native call failed: " .. tostring(result) .. ")"
   end
@@ -1077,34 +978,28 @@ function Brainstorm.auto_reroll()
   if result == nil or result == ffi.NULL then
     Brainstorm.ar_seeds_scanned = (Brainstorm.ar_seeds_scanned or 0)
       + math.max(0, seed_budget)
-    update_auto_reroll_status()
-    -- log_lua("brainstorm_search result=null")
+    update_auto_reroll_status(false)
     return nil
   end
 
   local string_success, seed_found = pcall(ffi.string, result)
   local free_success, free_err = pcall(immolate.free_result, result)
   if not free_success then
-    -- log_lua("brainstorm_search free failed: " .. tostring(free_err))
     return false,
       "Auto-reroll stopped (native cleanup failed: "
         .. tostring(free_err)
         .. ")"
   end
   if not string_success then
-    -- log_lua("brainstorm_search string failed: " .. tostring(seed_found))
     return false,
       "Auto-reroll stopped (native result failed: "
         .. tostring(seed_found)
         .. ")"
   end
-  -- log_lua("brainstorm_search result=" .. tostring(seed_found))
 
   return seed_found
 end
 
--- Hook to color-code filtered seeds in the UI
--- Filtered seeds appear in blue instead of red
 if not Brainstorm._hooks.round_scores_row then
   Brainstorm._hooks.round_scores_row = create_UIBox_round_scores_row
   function create_UIBox_round_scores_row(score, text_colour)

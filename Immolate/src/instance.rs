@@ -243,6 +243,19 @@ impl Instance {
     }
 
     pub fn init_locks(&mut self, ante: i32, fresh_profile: bool, fresh_run: bool) {
+        for pair in VOUCHERS.chunks_exact(2) {
+            self.lock(pair[1]);
+        }
+        for item in [
+            Item::Cavendish,
+            Item::Steel_Joker,
+            Item::Stone_Joker,
+            Item::Lucky_Cat,
+            Item::Golden_Ticket,
+            Item::Glass_Joker,
+        ] {
+            self.lock(item);
+        }
         if ante < 2 {
             self.lock_many(&[
                 Item::The_Mouth,
@@ -817,7 +830,6 @@ impl Instance {
         }
     }
 
-    #[allow(dead_code)]
     pub fn next_boss(&mut self, ante: i32) -> Item {
         let mut boss_pool = Vec::with_capacity(16);
         for boss in BOSSES {

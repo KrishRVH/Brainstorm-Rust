@@ -21,12 +21,19 @@ mod tests {
     use super::*;
     use std::ffi::{CStr, CString};
 
+    use crate::engine::config::CompiledFilter;
+    use crate::engine::kernels::apply_compiled_filter;
     use crate::engine::rng::RngKey;
+    use crate::engine::seed::SearchState;
+    use crate::engine::tables::{
+        STANDARD_JOKER_POOLS, TAG_POOL, VOUCHER_POOL, is_ante1_locked_tag,
+        is_first_shop_possible_joker, target_joker_pools,
+    };
     use crate::ffi::{brainstorm_search, free_result, immolate_last_error};
     use crate::instance::Instance;
     use crate::item::{
         COMMON_JOKERS, COMMON_JOKERS_100, Item, LEGENDARY_JOKERS, RARE_JOKERS, RARE_JOKERS_100,
-        UNCOMMON_JOKERS, UNCOMMON_JOKERS_100,
+        UNCOMMON_JOKERS, UNCOMMON_JOKERS_100, item_to_string,
     };
     use crate::rng::{LuaRandom, fract, pseudohash, pseudohash_from, pseudostep, round13};
     use crate::seed::Seed;
@@ -111,6 +118,13 @@ mod tests {
         assert_eq!(
             FilterConfig::from_raw(
                 "", "", "", "", "j_caino", "any", 0.0, false, false, "b_red", false, false, 0, 0.0
+            )
+            .joker,
+            Item::Canio
+        );
+        assert_eq!(
+            FilterConfig::from_raw(
+                "", "", "", "", "Caino", "any", 0.0, false, false, "b_red", false, false, 0, 0.0
             )
             .joker,
             Item::Canio
@@ -403,26 +417,555 @@ mod tests {
     }
 
     #[test]
-    fn current_core_matches_ux_composite_goldens() {
-        let expected = [
-            ("ux-pack-joker-only", Some("M8511111")),
-            ("ux-soul-arcana-only", Some("EF311111")),
-            ("ux-soul-spectral-only", Some("LO511111")),
-            ("ux-perkeo-only", Some("MZ111111")),
-            ("ux-tag-pack-joker", None),
-            ("ux-voucher-any-joker", None),
-            ("ux-tag-soul-pack", Some("EF311111")),
-            ("ux-tag-observatory", Some("U8411111")),
+    fn source_oracle_target_seeds_cover_every_immolate_modifier() {
+        let cases = [
+            ("no filters", "", FilterConfig::default()),
+            (
+                "tag filter in first selector",
+                "21111111",
+                raw_cfg(
+                    "",
+                    "",
+                    "tag_charm",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "tag filter in second selector",
+                "21111111",
+                raw_cfg(
+                    "",
+                    "",
+                    "",
+                    "tag_charm",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "ante-1 voucher filter",
+                "P1111111",
+                raw_cfg(
+                    "v_telescope",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "forced first Buffoon pack filter",
+                "",
+                raw_cfg(
+                    "",
+                    "p_buffoon_normal_1",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "weighted second pack filter",
+                "Z2111111",
+                raw_cfg(
+                    "",
+                    "p_spectral_mega_1",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "shop Joker filter",
+                "Q2111111",
+                raw_cfg(
+                    "",
+                    "",
+                    "",
+                    "",
+                    "Burnt Joker",
+                    "shop",
+                    0.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "Buffoon pack Joker filter",
+                "M8511111",
+                raw_cfg(
+                    "",
+                    "p_buffoon_mega_1",
+                    "",
+                    "",
+                    "Reserved Parking",
+                    "pack",
+                    0.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "any-location Joker filter",
+                "44311111",
+                raw_cfg(
+                    "",
+                    "p_buffoon_mega_1",
+                    "",
+                    "",
+                    "Blueprint",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "Arcana Soul count filter",
+                "EF311111",
+                raw_cfg(
+                    "",
+                    "p_arcana_mega_1",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    1.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "Spectral Soul count filter",
+                "LO511111",
+                raw_cfg(
+                    "",
+                    "p_spectral_mega_1",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    1.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "Perkeo via The Soul filter",
+                "MZ111111",
+                raw_cfg(
+                    "", "", "", "", "", "any", 0.0, false, true, "b_red", false, false, 0, 0.0,
+                ),
+            ),
+            (
+                "Observatory instant filter",
+                "S111111",
+                raw_cfg(
+                    "", "", "", "", "", "any", 0.0, true, false, "b_red", false, false, 0, 0.0,
+                ),
+            ),
+            (
+                "Erratic Deck face-count filter",
+                "11",
+                raw_cfg(
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_erratic",
+                    true,
+                    false,
+                    12,
+                    0.0,
+                ),
+            ),
+            (
+                "Erratic Deck suit-ratio filter",
+                "U4111111",
+                raw_cfg(
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_erratic",
+                    true,
+                    false,
+                    0,
+                    0.75,
+                ),
+            ),
+            (
+                "tag plus Observatory composite",
+                "U8411111",
+                raw_cfg(
+                    "",
+                    "",
+                    "tag_charm",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    true,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "Joker plus Observatory composite",
+                "L3411111",
+                raw_cfg(
+                    "",
+                    "",
+                    "",
+                    "",
+                    "Riff-raff",
+                    "any",
+                    0.0,
+                    true,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
         ];
 
-        for (case_name, expected_seed) in expected {
-            let case = benchmark_case(case_name);
-            let cfg = filter_config_from_benchmark(&case);
+        for (name, seed, cfg) in cases {
+            assert_seed_passes_like_source(name, seed, &cfg);
+        }
+    }
+
+    #[test]
+    fn optimized_core_matches_source_oracle_for_edge_windows() {
+        let cases = [
+            (
+                "duplicate tag requires both blind tags",
+                "",
+                100_000,
+                raw_cfg(
+                    "",
+                    "",
+                    "tag_charm",
+                    "tag_charm",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "Magic Deck unlocks Omen Globe voucher",
+                "",
+                10_000,
+                raw_cfg(
+                    "v_omen_globe",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_magic",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "Nebula Deck unlocks Observatory voucher",
+                "",
+                10_000,
+                raw_cfg(
+                    "v_observatory",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_nebula",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "Zodiac Deck unlocks Overstock Plus voucher",
+                "",
+                10_000,
+                raw_cfg(
+                    "v_overstock_plus",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_zodiac",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "no-face deck modifier affects Erratic suit-ratio analysis",
+                "",
+                10_000,
+                raw_cfg(
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_erratic",
+                    true,
+                    true,
+                    0,
+                    0.75,
+                ),
+            ),
+            (
+                "tag plus Soul count plus selected pack composite",
+                "",
+                100_000,
+                raw_cfg(
+                    "",
+                    "p_arcana_mega_1",
+                    "tag_charm",
+                    "",
+                    "",
+                    "any",
+                    1.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+        ];
+
+        for (name, seed_start, budget, cfg) in cases {
+            assert_core_matches_source_oracle(name, seed_start, &cfg, budget);
+        }
+    }
+
+    #[test]
+    fn first_shop_impossibilities_are_rejected_and_hidden_from_target_pools() {
+        let impossible = [
+            Item::Canio,
+            Item::Triboulet,
+            Item::Yorick,
+            Item::Chicot,
+            Item::Perkeo,
+            Item::Cavendish,
+            Item::Steel_Joker,
+            Item::Stone_Joker,
+            Item::Lucky_Cat,
+            Item::Golden_Ticket,
+            Item::Glass_Joker,
+        ];
+        for item in impossible {
+            assert!(!is_first_shop_possible_joker(item), "{item:?}");
+            assert_eq!(target_joker_pools(item), 0, "{item:?}");
             assert_eq!(
-                brainstorm_search_core(case.seed_start, &cfg, 100_000, 1).as_deref(),
-                expected_seed,
-                "current Rust mismatch for UI composite benchmark case {}",
-                case.name,
+                brainstorm_search_core(
+                    "",
+                    &raw_cfg(
+                        "",
+                        "",
+                        "",
+                        "",
+                        item_to_string(item),
+                        "any",
+                        0.0,
+                        false,
+                        false,
+                        "b_red",
+                        false,
+                        false,
+                        0,
+                        0.0,
+                    ),
+                    10_000,
+                    1,
+                ),
+                None,
+                "{item:?} should not be searchable in first-shop Joker filters",
+            );
+        }
+        assert_eq!(
+            brainstorm_search_core(
+                "",
+                &raw_cfg(
+                    "", "", "", "", "Caino", "any", 0.0, false, false, "b_red", false, false, 0,
+                    0.0,
+                ),
+                10_000,
+                1,
+            ),
+            None,
+            "Balatro's displayed Caino spelling should also be rejected",
+        );
+
+        for item in [
+            Item::Gros_Michel,
+            Item::Reserved_Parking,
+            Item::Seance,
+            Item::Burnt_Joker,
+        ] {
+            assert!(is_first_shop_possible_joker(item), "{item:?}");
+            assert_ne!(
+                target_joker_pools(item) & STANDARD_JOKER_POOLS,
+                0,
+                "{item:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn lua_joker_selector_rules_match_native_first_shop_impossibilities() {
+        const UI_LUA: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../UI.lua"));
+
+        let impossible = [
+            "Steel Joker",
+            "Stone Joker",
+            "Lucky Cat",
+            "Golden Ticket",
+            "Glass Joker",
+            "Cavendish",
+            "Caino",
+            "Canio",
+            "Triboulet",
+            "Yorick",
+            "Chicot",
+            "Perkeo",
+        ];
+        for name in impossible {
+            let quoted_entry = format!("[\"{name}\"] = true");
+            let bare_entry = format!("{name} = true");
+            assert!(
+                UI_LUA.contains(&quoted_entry) || UI_LUA.contains(&bare_entry),
+                "UI.lua should hide impossible first-shop Joker target {name}",
+            );
+        }
+
+        for gate in [
+            "center.rarity == 4",
+            "center.enhancement_gate",
+            "center.yes_pool_flag",
+            "first_shop_impossible_joker_names[center.name]",
+        ] {
+            assert!(
+                UI_LUA.contains(gate),
+                "UI.lua Joker selector should keep source-derived gate `{gate}`",
             );
         }
     }
@@ -521,44 +1064,101 @@ mod tests {
     }
 
     #[test]
-    fn current_core_matches_ux_benchmark_cases_with_lua_threads() {
-        let expected = [
-            ("ux-tag-voucher-pack", None),
-            ("ux-pack-joker-only", Some("M8511111")),
-            ("ux-soul-arcana-only", Some("EF311111")),
-            ("ux-tag-pack-joker", None),
-            ("ux-voucher-any-joker", None),
-            ("ux-tag-soul-pack", Some("EF311111")),
-            ("ux-tag-observatory", Some("U8411111")),
-            ("ux-erratic-tag-suit", None),
-        ];
+    fn current_core_matches_source_oracle_for_every_ux_benchmark_case() {
+        for case in crate::bench_cases::bench_cases()
+            .into_iter()
+            .filter(|case| case.group == crate::bench_cases::BenchGroup::Ux)
+        {
+            let cfg = filter_config_from_benchmark(&case);
+            assert_core_matches_source_oracle(case.name, case.seed_start, &cfg, 100_000);
+        }
+    }
 
-        for (case_name, expected_seed) in expected {
-            let case = crate::bench_cases::bench_cases()
-                .into_iter()
-                .find(|case| case.name == case_name)
-                .expect("missing UX benchmark case");
-            let cfg = FilterConfig::from_raw(
-                case.voucher,
-                case.pack,
-                case.tag1,
-                case.tag2,
-                case.joker,
-                case.joker_location,
-                case.souls,
-                case.observatory,
-                case.perkeo,
-                case.deck,
-                case.erratic,
-                case.no_faces,
-                case.min_face_cards,
-                case.suit_ratio,
+    #[test]
+    fn source_locked_tags_and_vouchers_are_static_no_match() {
+        use crate::engine::config::KernelShape;
+
+        for &tag in TAG_POOL {
+            let cfg = FilterConfig {
+                tag1: tag,
+                ..FilterConfig::default()
+            };
+            if is_ante1_locked_tag(tag) {
+                assert_eq!(
+                    CompiledFilter::compile(&cfg).shape,
+                    KernelShape::NoMatch,
+                    "ante-1 locked tag {} should not scan seeds",
+                    item_to_string(tag),
+                );
+            } else {
+                assert_ne!(
+                    CompiledFilter::compile(&cfg).shape,
+                    KernelShape::NoMatch,
+                    "unlocked ante-1 tag {} should remain searchable",
+                    item_to_string(tag),
+                );
+            }
+        }
+
+        for voucher_pair in VOUCHER_POOL.chunks_exact(2) {
+            let base = voucher_pair[0];
+            let upgrade = voucher_pair[1];
+            assert_ne!(
+                CompiledFilter::compile(&FilterConfig {
+                    voucher: base,
+                    ..FilterConfig::default()
+                })
+                .shape,
+                KernelShape::NoMatch,
+                "base voucher {} should be searchable on Red Deck",
+                item_to_string(base),
             );
             assert_eq!(
-                brainstorm_search_core(case.seed_start, &cfg, 100_000, 0).as_deref(),
-                expected_seed,
-                "current Rust mismatch for UI benchmark case {}",
-                case.name,
+                CompiledFilter::compile(&FilterConfig {
+                    voucher: upgrade,
+                    ..FilterConfig::default()
+                })
+                .shape,
+                KernelShape::NoMatch,
+                "upgrade voucher {} should be locked without its prerequisite",
+                item_to_string(upgrade),
+            );
+        }
+
+        for (deck, active, upgrade) in [
+            (Item::Magic_Deck, Item::Crystal_Ball, Item::Omen_Globe),
+            (Item::Nebula_Deck, Item::Telescope, Item::Observatory),
+            (Item::Zodiac_Deck, Item::Overstock, Item::Overstock_Plus),
+            (Item::Zodiac_Deck, Item::Tarot_Merchant, Item::Tarot_Tycoon),
+            (
+                Item::Zodiac_Deck,
+                Item::Planet_Merchant,
+                Item::Planet_Tycoon,
+            ),
+        ] {
+            assert_eq!(
+                CompiledFilter::compile(&FilterConfig {
+                    voucher: active,
+                    deck,
+                    ..FilterConfig::default()
+                })
+                .shape,
+                KernelShape::NoMatch,
+                "{} starts with {}, so it cannot roll as the ante-1 voucher",
+                item_to_string(deck),
+                item_to_string(active),
+            );
+            assert_ne!(
+                CompiledFilter::compile(&FilterConfig {
+                    voucher: upgrade,
+                    deck,
+                    ..FilterConfig::default()
+                })
+                .shape,
+                KernelShape::NoMatch,
+                "{} should unlock {} from its starting voucher",
+                item_to_string(deck),
+                item_to_string(upgrade),
             );
         }
     }
@@ -579,6 +1179,69 @@ mod tests {
                     "any",
                     0.0,
                     false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "voucher upgrade without prerequisite voucher",
+                FilterConfig::from_raw(
+                    "v_observatory",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "observatory with a different voucher target",
+                FilterConfig::from_raw(
+                    "v_tarot_merchant",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    true,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
+                "observatory with Telescope already active",
+                FilterConfig::from_raw(
+                    "", "", "", "", "", "any", 0.0, true, false, "b_nebula", false, false, 0, 0.0,
+                ),
+            ),
+            (
+                "observatory with incompatible pack target",
+                FilterConfig::from_raw(
+                    "",
+                    "p_spectral_mega_1",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    true,
                     false,
                     "b_red",
                     false,
@@ -609,6 +1272,25 @@ mod tests {
                 ),
             ),
             (
+                "pack-only joker in non-Buffoon pack",
+                FilterConfig::from_raw(
+                    "",
+                    "p_spectral_mega_1",
+                    "",
+                    "",
+                    "Blueprint",
+                    "pack",
+                    0.0,
+                    false,
+                    false,
+                    "b_red",
+                    false,
+                    false,
+                    0,
+                    0.0,
+                ),
+            ),
+            (
                 "too many souls in selected pack",
                 FilterConfig::from_raw(
                     "",
@@ -625,6 +1307,12 @@ mod tests {
                     false,
                     0,
                     0.0,
+                ),
+            ),
+            (
+                "two souls in first shop",
+                FilterConfig::from_raw(
+                    "", "", "", "", "", "any", 2.0, false, false, "b_red", false, false, 0, 0.0,
                 ),
             ),
             (
@@ -691,31 +1379,44 @@ mod tests {
                 ),
             ),
             (
-                "legendary shop joker",
-                FilterConfig::from_raw(
-                    "", "", "", "", "Perkeo", "shop", 0.0, false, false, "b_red", false, false, 0,
-                    0.0,
-                ),
-            ),
-            (
-                "too many souls in selected pack",
+                "erratic impossible face count",
                 FilterConfig::from_raw(
                     "",
-                    "p_spectral_normal_1",
+                    "",
                     "",
                     "",
                     "",
                     "any",
-                    3.0,
+                    0.0,
                     false,
                     false,
-                    "b_red",
+                    "b_erratic",
+                    true,
                     false,
-                    false,
-                    0,
+                    53,
                     0.0,
                 ),
             ),
+            ("erratic impossible suit ratio", {
+                let mut cfg = FilterConfig::from_raw(
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "any",
+                    0.0,
+                    false,
+                    false,
+                    "b_erratic",
+                    true,
+                    false,
+                    0,
+                    1.0,
+                );
+                cfg.suit_ratio = 1.01;
+                cfg
+            }),
         ];
 
         for (name, cfg) in cases {
@@ -846,6 +1547,95 @@ mod tests {
         free_result(one_result);
         free_result(std::ptr::null_mut());
         assert!(immolate_last_error().is_null());
+    }
+
+    fn raw_cfg(
+        voucher: &str,
+        pack: &str,
+        tag1: &str,
+        tag2: &str,
+        joker_name: &str,
+        joker_location: &str,
+        souls: f64,
+        observatory: bool,
+        perkeo: bool,
+        deck: &str,
+        erratic: bool,
+        no_faces: bool,
+        min_face_cards: i32,
+        suit_ratio: f64,
+    ) -> FilterConfig {
+        FilterConfig::from_raw(
+            voucher,
+            pack,
+            tag1,
+            tag2,
+            joker_name,
+            joker_location,
+            souls,
+            observatory,
+            perkeo,
+            deck,
+            erratic,
+            no_faces,
+            min_face_cards,
+            suit_ratio,
+        )
+    }
+
+    fn assert_seed_passes_like_source(name: &str, seed: &str, cfg: &FilterConfig) {
+        assert!(
+            source_oracle_passes_seed(seed, cfg),
+            "{name}: source model rejected target seed {seed}",
+        );
+
+        let compiled = CompiledFilter::compile(cfg);
+        let mut state = SearchState::from_id(Seed::from_str(seed).id());
+        assert!(
+            apply_compiled_filter(&mut state, &compiled),
+            "{name}: optimized predicate rejected target seed {seed}",
+        );
+
+        for threads in [1, 2, 0] {
+            assert_eq!(
+                brainstorm_search_core(seed, cfg, 1, threads).as_deref(),
+                Some(seed),
+                "{name}: search rejected target seed {seed} with {threads} threads",
+            );
+        }
+    }
+
+    fn assert_core_matches_source_oracle(
+        name: &str,
+        seed_start: &str,
+        cfg: &FilterConfig,
+        budget: i64,
+    ) {
+        let expected = source_oracle_search(seed_start, cfg, budget);
+        for threads in [1, 2, 0] {
+            assert_eq!(
+                brainstorm_search_core(seed_start, cfg, budget, threads),
+                expected,
+                "{name}: optimized search disagreed with source model using {threads} threads",
+            );
+        }
+    }
+
+    fn source_oracle_search(seed_start: &str, cfg: &FilterConfig, budget: i64) -> Option<String> {
+        let mut seed = Seed::from_str(seed_start);
+        for _ in 0..resolve_seed_budget(budget) {
+            let mut inst = Instance::new(seed.clone());
+            if crate::filters::apply_filters(&mut inst, cfg) {
+                return Some(seed.to_string());
+            }
+            seed.next();
+        }
+        None
+    }
+
+    fn source_oracle_passes_seed(seed: &str, cfg: &FilterConfig) -> bool {
+        let mut inst = Instance::new(Seed::from_str(seed));
+        crate::filters::apply_filters(&mut inst, cfg)
     }
 
     fn benchmark_case(name: &str) -> crate::bench_cases::BenchCase {

@@ -24,7 +24,7 @@ impl Default for Args {
         Self {
             case: "all".to_owned(),
             budget: 1_000_000,
-            threads: 1,
+            threads: 0,
             repeat: 3,
             warmup: 0,
         }
