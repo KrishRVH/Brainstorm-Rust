@@ -4,8 +4,9 @@
 Brainstorm is a Balatro mod that rapidly searches for seeds matching
 voucher/pack/tag/Joker/Erratic Deck filters and integrates directly into the
 game loop through Lua plus a native Rust DLL. The current DLL includes a
-user-toggleable CUDA fast path for Red Deck tag/voucher/pack/Observatory
-searches and falls back to the Rust CPU engine for the rest.
+user-toggleable CUDA fast path for Red Deck tag/voucher/pack/Observatory and
+one-Soul Arcana/Spectral pack searches, and falls back to the Rust CPU engine
+for the rest.
 
 ## Setup (Required First)
 1. Install `smods-1.0.0-beta` (Steamodded) for Balatro.
@@ -32,8 +33,8 @@ This project is licensed under CC BY-NC-SA 4.0.
 - The Immolate native DLL source was created by MathIsFun0. This project uses
   CC BY-NC-SA 4.0 to remain compatible with the original Immolate source:
   https://github.com/SpectralPack/Immolate/tree/26f41efcc313f045bc8bdbf49e5851c56ac40b31.
-- KRVH completed the Immolate C++ rewrite, ported unfinished functionality, and
-  added the Joker search workflow.
+- KRVH completed this Rust rewrite, ported unfinished functionality, and added
+  the Joker search workflow.
 
 ## Features
 - Auto-reroll with dual-tag support (order-agnostic or same-tag-twice).
@@ -65,8 +66,8 @@ mise run setup-lua
 ```bash
 rustup target add x86_64-pc-windows-gnu
 ```
-- MinGW-w64 and Wine are required for C++ oracle builds, DLL comparison, and
-  benchmarks.
+- MinGW-w64 and Wine are required for Windows Rust DLL builds, DLL validation,
+  and benchmarks.
 - CUDA Toolkit with `nvcc` and a compatible host compiler is required for the
   GPU-enabled build. On Ubuntu/WSL, `nvidia-cuda-toolkit` plus `gcc-12` matches
   the default `CUDAHOSTCXX=gcc-12`. The default CUDA target is `sm_89` for RTX
@@ -81,8 +82,9 @@ installs local Lua lint tools through LuaRocks, and runs `mise run doctor` to
 check the remaining WSL/system dependencies.
 
 `mise run build` builds the current Rust native DLL and writes `Immolate.dll`.
-There is one Rust implementation now. `mise run build-cpp` still builds the C++
-oracle from `Immolate/CPP/` for parity checks, but the game uses the Rust DLL.
+There is one Rust implementation now, and Rust CPU is the correctness oracle for
+CUDA. The bundled legacy Original Brainstorm DLL is used only as a historical
+benchmark baseline where its older ABI can express the same fixture.
 The Rust build embeds PTX compiled from `Immolate/Rust/src/cuda/brainstorm_cuda.cu`;
 at runtime the DLL loads the CUDA Driver API dynamically (`nvcuda.dll` on
 Windows, `libcuda` under WSL/Linux). The Brainstorm settings tab controls
@@ -90,9 +92,9 @@ whether the DLL tries CUDA. If CUDA is enabled but unavailable, or if a filter
 is not GPU-supported, search automatically uses the Rust CPU path.
 
 `mise run lint` runs Lua formatting, LuaJIT bytecode syntax checks, luacheck,
-C++ formatting checks, rustfmt, and clippy. `mise run check-rust` runs Rust
-formatting, clippy, unit tests, DLL export/import validation, C++ vs Rust
-parity, and a benchmark regression smoke. `mise run check` runs both.
+rustfmt, and clippy. `mise run check-rust` runs Rust formatting, clippy, unit
+tests, DLL export/import validation, and benchmark smoke tests. `mise run check`
+runs both.
 
 Strict full-suite benchmark gate:
 
@@ -100,10 +102,16 @@ Strict full-suite benchmark gate:
 mise run bench-full
 ```
 
-Actual Lua UI UX benchmark gate:
+DLL UX benchmark gate:
 
 ```bash
 mise run bench-ux
+```
+
+Native Windows CUDA long-scan benchmark from WSL:
+
+```bash
+mise run bench-cuda-long-windows
 ```
 
 See `Immolate/Rust/BENCH.md` for benchmark workflows.

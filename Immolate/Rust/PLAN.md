@@ -1,12 +1,13 @@
 # Immolate Rust Current State
 
-Last updated: 2026-06-10
+Last updated: 2026-06-29
 
 This document records the current Rust DLL architecture and maintenance rules.
 The Rust rewrite is complete. Brainstorm now has one Rust implementation, built
-by default as `Immolate.dll`. The C++ source remains buildable only as the
-behavior oracle for parity and benchmarking. This branch also embeds a CUDA PTX
-fast path for the highest-volume ante-1 filters.
+by default as `Immolate.dll`. Rust CPU is the correctness oracle for CUDA, and
+the bundled legacy Original Brainstorm DLL is used only as a historical
+benchmark baseline where its older ABI can represent the same fixture. The Rust
+DLL embeds a CUDA PTX fast path for the highest-volume ante-1 filters.
 
 For benchmark operation details, use `Immolate/Rust/BENCH.md`.
 
@@ -14,16 +15,20 @@ For benchmark operation details, use `Immolate/Rust/BENCH.md`.
 
 - `mise run build` and `mise run build-rust` build the Rust DLL and copy it to the repo
   root as `Immolate.dll`.
-- `mise run build-cpp` builds the C++ oracle to `target/cpp/Immolate.dll`.
-- C++ oracle source lives under `Immolate/CPP/`; Rust source lives under
-  `Immolate/Rust/`.
+- Rust source lives under `Immolate/Rust/`.
 - CUDA source lives under `Immolate/Rust/src/cuda/` and is compiled to embedded
   PTX by `Immolate/Rust/build.rs`.
-- There are no older Rust build features, mise tasks, or source modules.
-- `mise run compare` validates C++ vs Rust through the Windows ABI under Wine.
-- `mise run bench-compare` benchmarks C++ vs Rust through the same ABI harness.
-- Benchmark comparison fails on result mismatch. A faster wrong seed is a
-  failure.
+- There is no C++ source tree or alternate native implementation in this
+  branch.
+- `mise run compare` is an alias for `mise run bench-compare`.
+- `mise run bench-compare` benchmarks Rust CPU, Rust CUDA, and the legacy
+  Original Brainstorm DLL through the Windows ABI harness.
+- `mise run bench-compare-windows` launches the same harness as a native
+  Windows process from WSL, which is the game-like CUDA benchmark path.
+- `mise run bench-cuda-long-windows` runs the long CUDA fixtures with a
+  25,000,000 seed budget.
+- Benchmark comparison fails when Rust CUDA returns a different result than
+  Rust CPU. A faster wrong seed is a failure.
 
 ## Runtime Contract
 
@@ -52,7 +57,8 @@ const char* brainstorm_search(
 
 void immolate_set_log_path(const char* path);
 void immolate_set_cuda_enabled(bool enabled);
-void free_result(const char* result);
+const char* immolate_last_error(void);
+void free_result(char* result);
 ```
 
 FFI rules:
@@ -64,15 +70,13 @@ FFI rules:
 - A non-empty result is returned as an owned C string and must be released with
   `free_result`.
 - `immolate_set_log_path` is a no-op while logging remains disabled.
-- Rust exports only `brainstorm_search`, `free_result`, `immolate_set_log_path`,
-  and `immolate_set_cuda_enabled`.
+- Rust exports only `brainstorm_search`, `free_result`, `immolate_last_error`,
+  `immolate_set_log_path`, and `immolate_set_cuda_enabled`.
 - `immolate_set_cuda_enabled` is the native side of the Brainstorm UI CUDA
   toggle. It does not affect unsupported filters, which still use CPU fallback.
 
 ## Source Layout
 
-- `Immolate/CPP/`: C++ oracle source, including `brainstorm.cpp` as the DLL
-  entry implementation for oracle builds.
 - `Immolate/Rust/src/ffi.rs`: C ABI boundary and string/result ownership.
 - `Immolate/Rust/src/lib.rs`: public Rust API and unit tests.
 - `Immolate/Rust/src/filters.rs`: raw UI/FFI filter parsing into `FilterConfig`.
@@ -112,20 +116,29 @@ with a `KernelShape`. Shapes include:
 - `Souls`
 - `Perkeo`
 - `Erratic`
+- `TagObservatory`
+- `SpectralSoulPerkeo`
 - `Composite`
 - `Generic`
 
-Dedicated kernels live in `engine/kernels.rs`. `Composite` handles real UI
+Optimized CPU kernels live in `engine/kernels.rs`. `Composite` handles real UI
 combinations such as tag+voucher+pack, voucher+pack, tag+joker, Souls+pack, and
-Erratic+tag without falling all the way back to the old generic instance path.
+Erratic+tag without falling all the way back to the instance-driven generic
+path.
 `Generic` remains as a correctness fallback for unsupported combinations.
 
 `engine/search.rs` tries CUDA before CPU once a filter is compiled and the
 Brainstorm UI has CUDA enabled. CUDA is currently supported for Red Deck filters
-made only from tags, voucher, pack, and Observatory constraints. Joker search,
-Souls, Perkeo, Erratic Deck, non-red decks, and any unsupported composite
-continue through the Rust CPU engine. CUDA failures are treated as unavailable
-and do not change search results.
+made from tags, voucher, pack, Observatory constraints, and one-Soul
+Arcana/Spectral pack searches. Joker search, Perkeo, Erratic Deck, non-red
+decks, and any unsupported composite continue through the Rust CPU engine. CUDA
+failures are treated as unavailable and do not change search results.
+
+The CUDA search kernels keep the game-facing path GPU-oriented: filter params
+are passed as kernel params, selected Spectral Soul searches dispatch to a
+narrower kernel, search launches do not cross the seed-space wrap boundary, and
+the hot search kernels decode already-normalized seed ids so generated PTX does
+not contain 64-bit integer divide/modulo instructions for seed decoding.
 
 Parallel search preserves earliest-seed semantics. For parallel runs, Rust scans
 the first chunk serially, then searches remaining chunks in parallel while
@@ -138,8 +151,8 @@ Use `BENCH_THREADS=0` for actual user-experience benchmarking. Use
 
 ## Correctness Invariants
 
-The Rust implementation must match the observable C++ oracle unless an explicit
-product decision says otherwise.
+The Rust CPU implementation is the oracle for CUDA unless an explicit product
+decision says otherwise.
 
 Important invariants:
 
@@ -165,7 +178,7 @@ mise run check-rust
 ```
 
 That runs Rust formatting, clippy, unit tests, DLL export/import validation,
-C++ vs Rust parity, and a small benchmark smoke test.
+and small benchmark smoke tests.
 
 CUDA build/runtime knobs:
 
@@ -185,7 +198,7 @@ Strict full-suite performance gate:
 mise run bench-full
 ```
 
-Actual Lua UI UX gate:
+DLL UX gate:
 
 ```bash
 mise run bench-ux
@@ -197,24 +210,47 @@ Pretty full-suite dashboard:
 mise run bench-pretty
 ```
 
-## Latest Local Validation State
+## Current Local Validation State
 
-The latest CUDA integration validation passed on WSL2 with an RTX 4090:
+The current branch was validated locally after installing CUDA Toolkit 12.4,
+GCC 12, MinGW-w64, Wine, and using Windows PowerShell from WSL:
 
-- `mise run setup-lua`
 - `mise run doctor`
-- `mise run lint`
-- `mise run check`
-- `BRAINSTORM_DEBUG_CUDA=1 cargo run --manifest-path Immolate/Rust/Cargo.toml --bin brainstorm_probe`
-- CPU-only native benchmark using `BRAINSTORM_SKIP_CUDA_BUILD=1`
-- CUDA native benchmark for `ux-tag-voucher-pack`
+- `mise run check-rust`
+- `WINEDEBUG=-all mise run bench-full`
+- `WINEDEBUG=-all mise run bench-ux`
+- `mise run bench-cuda-long-windows`
+- Native Linux CUDA benchmark:
+  `cargo run --manifest-path Immolate/Rust/Cargo.toml --release --bin brainstorm_bench -- --case ux-tag-voucher-pack --budget 1000000 --threads 0 --repeat 3 --warmup 1`
+- Native Windows CUDA long benchmark:
+  `mise run bench-cuda-long-windows` scanned 22,882,982, 20,776,082,
+  and 25,000,000 seeds at a 25,000,000 seed budget.
+- After the CUDA optimization pass, generated PTX was checked for
+  `div.s64`, `div.u64`, `rem.s64`, and `rem.u64`; none remained in the emitted
+  PTX.
+- Native Windows exact-case CUDA checks on the game-like DLL path:
+  - 100,000 seed Spectral Soul voucher+tag miss: CUDA mean 0.237 ms,
+    p50 0.238 ms, Rust CPU mean 23.740 ms.
+  - 1,000,000 seed Spectral Soul voucher+tag miss: CUDA p50 1.135 ms,
+    Rust CPU p50 37.873 ms. The mean was 1.309 ms because of Windows GPU
+    scheduling spikes.
+  - 25,000,000 seed Spectral Soul strict-tag hit: CUDA mean 22.944 ms
+    at 905M seeds/s, Rust CPU mean 526.862 ms.
+  - 25,000,000 seed Spectral Soul voucher+tag miss: CUDA mean 27.918 ms
+    at 895M seeds/s, Rust CPU mean 627.848 ms.
+- CPU-only native comparison using `BRAINSTORM_SKIP_CUDA_BUILD=1`
+- `git diff --check`
 
-The CUDA probe checks CPU/GPU debug parity for sampled seeds and verifies known
-supported search vectors. `mise run check` includes Lua formatting, LuaJIT
-bytecode syntax checks, luacheck, C++ formatting, Rust lints/tests, DLL export
-checks, C++/Rust result parity through the Windows ABI, and a benchmark smoke.
-Full performance gates remain `mise run bench-full` and `mise run bench-ux`; run
-them before claiming release benchmark state.
+The committed legacy Original DLL SHA-256 is
+`905990daa83a9d7eef491b1cbb84c480305eb8b6f436115178cfdf40d0ccc09e`.
+The native CUDA benchmark found `Q8K1111` for `ux-tag-voucher-pack` after
+848,319 scanned seeds in about 1.2 ms, versus about 34 ms for the CPU-only
+native run. Wine loaded the host `nvcuda.dll`, but direct probing returned CUDA
+driver error code 100 from `cuInit`, so Wine benchmark rows labeled
+`rust-cuda` used the Rust CPU fallback in this environment. A Windows process
+launched through PowerShell returned `cuInit=0` and saw one CUDA device, so
+`mise run bench-cuda-long-windows` is the local game-like Windows CUDA
+performance check.
 
 ## Release Notes For Maintainers
 

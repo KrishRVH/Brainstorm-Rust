@@ -8,30 +8,36 @@ Quick reference for contributing to Brainstorm (Balatro mod with a native DLL).
 
 ## Project Structure & Module Organization
 - Lua entry/UI: `Brainstorm.lua`, `UI.lua`; config/compat in `config.lua`, `lovely.toml`, `nativefs.lua`, `steamodded_compat.lua`.
-- Native sources: `Immolate/Rust/` is the only Rust DLL implementation. `Immolate/CPP/*.cpp` and `Immolate/CPP/*.hpp` remain the C++ oracle (CPU-only; entry is `Immolate/CPP/brainstorm.cpp`).
-- Artifacts: DLL is `Immolate.dll` (default). Build/lint/format/deploy all use `mise.toml`. The C++ oracle artifact is kept under `target/cpp/`, and the current Rust artifact is kept under `target/rust/`.
+- Native sources: `Immolate/Rust/` is the Rust DLL implementation and Rust CPU
+  is the correctness oracle for CUDA.
+- Artifacts: DLL is `Immolate.dll` (default). Build/lint/format/deploy all use
+  `mise.toml`; the current Rust artifact is kept under `target/rust/`.
+- Legacy benchmark artifact: `Immolate/Immolate-OceanRamenandMathIsFun0.dll`
+  is the committed Original Brainstorm DLL from MathIsFun0/OceanRamen and is
+  used only as a historical benchmark baseline.
 - `BalatroSource/` is the literal game source; never commit it to git and always use it as the source of truth for understanding game behavior.
 - `BalatroSource_Guide.md` summarizes seed/search-relevant mechanics verified from `BalatroSource/`.
-- Logging is currently disabled in Lua/C++ and the Rust `immolate_set_log_path` export is a no-op; keep it off unless explicitly re-enabled.
+- Logging is currently disabled in Lua and the Rust `immolate_set_log_path`
+  export is a no-op; keep it off unless explicitly re-enabled.
 
 ## Build and Development Commands
 - First run in a checkout: `mise trust`.
 - Install mise-managed tools and local Lua lint tools: `mise run setup`.
 - Dependency check: `mise run doctor`.
 - Build: `mise run build` outputs the Rust `Immolate.dll`.
-- C++ oracle: `mise run build-cpp`.
 - Rust validation: `mise run check-rust`.
-- C++ vs Rust parity: `mise run compare`.
+- Legacy/Rust benchmark comparison: `mise run compare` or `mise run bench-compare`.
 - Benchmarks: `mise run bench-compare`.
 - Strict full-suite benchmark gate: `mise run bench-full`.
-- Actual Lua UI UX benchmark gate: `mise run bench-ux`.
+- DLL UX benchmark gate: `mise run bench-ux`.
+- Native Windows CUDA long-scan benchmark from WSL: `mise run bench-cuda-long-windows`.
 - Pretty full-suite dashboard: `mise run bench-pretty`.
 - Deploy: `TARGET=/mnt/c/Users/Krish/AppData/Roaming/Balatro/Mods/Brainstorm mise run deploy`.
 - Release: `mise run release` (runs `mise run check`, builds the DLL, and zips `release/Brainstorm_v3.1.zip`).
 - Dev release workflow: `.github/workflows/dev-release.yml` publishes/updates the `dev-release` prerelease on `master` pushes and manual dispatch.
-- Formatting: `mise run format` (runs stylua/clang-format/rustfmt when available).
-- Lint: `mise run lint` (stylua, LuaJIT bytecode syntax, luacheck,
-  clang-format, rustfmt, and clippy checks).
+- Formatting: `mise run format` (runs stylua and rustfmt when available).
+- Lint: `mise run lint` (stylua, LuaJIT bytecode syntax, luacheck, rustfmt,
+  and clippy checks).
 - Clean: `mise run clean`.
 - No standalone scripts or test runners; use the mise tasks and validate in-game.
 
@@ -46,13 +52,15 @@ Quick reference for contributing to Brainstorm (Balatro mod with a native DLL).
 - Joker search checks the first shop: location `shop` scans shop slots, `pack` scans Buffoon packs, `any` checks both (pack search respects the selected pack filter).
 - Soul checks only apply to Arcana/Spectral packs in the current shop slots.
 - Auto-reroll UI shows live scanned seed counts; SPF options go from 1,000 to 1,000,000 seeds per pass.
-- Rust search must preserve earliest matching seed semantics for both single-thread and parallel searches. Benchmark result mismatches fail the harness, even when the timing is faster.
+- Rust search must preserve earliest matching seed semantics for both single-thread
+  and parallel searches. CUDA benchmark result mismatches against Rust CPU fail
+  the harness, even when the timing is faster.
 
 ## Coding Style & Naming Conventions
 - Lua: Stylua (`stylua.toml`) — 2-space indent, ~80 cols. Avoid globals, return tables explicitly.
 - Rust: rustfmt and clippy; keep unsafe isolated at FFI/harness boundaries.
-- C++: C++17 with RAII; keep stdout minimal. clang-format when available.
-- Naming: Lua locals/functions lower_snake; constants upper snake (`Brainstorm.VERSION`); C++ types PascalCase, file-scope statics as needed.
+- Naming: Lua locals/functions lower_snake; constants upper snake
+  (`Brainstorm.VERSION`).
 
 ## Commit & Pull Request Guidelines
 - Use short, imperative subjects (scope prefix optional: `core:`, `ui:`, `dll:`). Do not commit `release/` artifacts.

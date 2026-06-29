@@ -12,6 +12,7 @@ static constexpr uint32_t FLAG_TAGS = 1u << 0;
 static constexpr uint32_t FLAG_VOUCHER = 1u << 1;
 static constexpr uint32_t FLAG_PACKS = 1u << 2;
 static constexpr uint32_t FLAG_OBSERVATORY = 1u << 3;
+static constexpr uint32_t FLAG_SOULS = 1u << 4;
 
 static constexpr int64_t SEED_SPACE = 2318107019761LL;
 static constexpr uint64_t K_MAX_U64 = 0xffffffffffffffffULL;
@@ -21,11 +22,6 @@ static constexpr uint64_t K_DBL_MANT_SIZE = 52ULL;
 static constexpr uint64_t K_DBL_EXPO_SIZE = 11ULL;
 static constexpr uint64_t K_DBL_EXPO_BIAS = 1023ULL;
 static constexpr double PI_HASH = 3.141592653589793116;
-
-static __device__ __constant__ int64_t ID_COEFF[8] = {
-    66231629136LL, 1892332261LL, 54066636LL, 1544761LL,
-    44136LL,       1261LL,       36LL,       1LL,
-};
 
 static __device__ __constant__ uint8_t SEED_CHARS[35] = {
     '1','2','3','4','5','6','7','8','9','A','B','C','D','E','F','G','H','I',
@@ -128,25 +124,38 @@ static __device__ __forceinline__ double pseudostep(uint8_t byte, uint32_t pos, 
                       PI_HASH * static_cast<double>(pos));
 }
 
-static __device__ SeedState seed_from_id(int64_t raw_id) {
-    int64_t id = raw_id % SEED_SPACE;
-    if (id < 0) {
-        id += SEED_SPACE;
+template <int INDEX, uint64_t COEFF>
+static __device__ __forceinline__ void seed_digit(uint64_t* id, SeedState* out) {
+    if (*id > 0ULL) {
+        uint64_t digit = (*id - 1ULL) / COEFF;
+        out->length += 1;
+        out->seed[INDEX] = static_cast<int16_t>(digit);
+        *id -= 1ULL + digit * COEFF;
+    } else {
+        out->seed[INDEX] = -1;
     }
+}
 
+static __device__ __forceinline__ SeedState seed_from_normalized_id(uint64_t id) {
     SeedState out{};
     out.length = 0;
-    #pragma unroll
-    for (int i = 0; i < 8; ++i) {
-        if (id > 0) {
-            out.length += 1;
-            out.seed[i] = static_cast<int16_t>((id - 1) / ID_COEFF[i]);
-            id -= 1 + static_cast<int64_t>(out.seed[i]) * ID_COEFF[i];
-        } else {
-            out.seed[i] = -1;
-        }
-    }
+    seed_digit<0, 66231629136ULL>(&id, &out);
+    seed_digit<1, 1892332261ULL>(&id, &out);
+    seed_digit<2, 54066636ULL>(&id, &out);
+    seed_digit<3, 1544761ULL>(&id, &out);
+    seed_digit<4, 44136ULL>(&id, &out);
+    seed_digit<5, 1261ULL>(&id, &out);
+    seed_digit<6, 36ULL>(&id, &out);
+    seed_digit<7, 1ULL>(&id, &out);
     return out;
+}
+
+static __device__ SeedState seed_from_id(int64_t raw_id) {
+    int64_t normalized = raw_id % SEED_SPACE;
+    if (normalized < 0) {
+        normalized += SEED_SPACE;
+    }
+    return seed_from_normalized_id(static_cast<uint64_t>(normalized));
 }
 
 static __device__ __forceinline__ uint8_t seed_char(const SeedState& seed, uint32_t index) {
@@ -186,9 +195,49 @@ static __device__ double initial_node_voucher1(const SeedState& seed) {
     return pseudohash_from_key(KEY, seed_pseudohash(seed, 8));
 }
 
+static __device__ uint32_t append_decimal(uint8_t* key, uint32_t len, int value) {
+    int divisor = 1000;
+    bool started = false;
+    while (divisor > 0) {
+        int digit = (value / divisor) % 10;
+        if (digit != 0 || started || divisor == 1) {
+            key[len++] = static_cast<uint8_t>('0' + digit);
+            started = true;
+        }
+        divisor /= 10;
+    }
+    return len;
+}
+
+static __device__ double initial_node_voucher1_resample(const SeedState& seed, int resample) {
+    uint8_t key[32];
+    const uint8_t prefix[] = "Voucher1_resample";
+    uint32_t len = 0;
+    for (uint32_t i = 0; i < sizeof(prefix) - 1; ++i) {
+        key[len++] = prefix[i];
+    }
+    len = append_decimal(key, len, resample);
+
+    double num = seed_pseudohash(seed, len);
+    for (int i = static_cast<int>(len) - 1; i >= 0; --i) {
+        num = pseudostep(key[i], static_cast<uint32_t>(i + 1), num);
+    }
+    return num;
+}
+
 static __device__ double initial_node_shop_pack1(const SeedState& seed) {
     static constexpr uint8_t KEY[] = "shop_pack1";
     return pseudohash_from_key(KEY, seed_pseudohash(seed, 10));
+}
+
+static __device__ double initial_node_soul_tarot1(const SeedState& seed) {
+    static constexpr uint8_t KEY[] = "soul_Tarot1";
+    return pseudohash_from_key(KEY, seed_pseudohash(seed, 11));
+}
+
+static __device__ double initial_node_soul_spectral1(const SeedState& seed) {
+    static constexpr uint8_t KEY[] = "soul_Spectral1";
+    return pseudohash_from_key(KEY, seed_pseudohash(seed, 14));
 }
 
 static __device__ double initial_node_tag1_resample(const SeedState& seed, int resample) {
@@ -198,13 +247,7 @@ static __device__ double initial_node_tag1_resample(const SeedState& seed, int r
     for (uint32_t i = 0; i < sizeof(prefix) - 1; ++i) {
         key[len++] = prefix[i];
     }
-    if (resample >= 100) {
-        key[len++] = static_cast<uint8_t>('0' + (resample / 100) % 10);
-    }
-    if (resample >= 10) {
-        key[len++] = static_cast<uint8_t>('0' + (resample / 10) % 10);
-    }
-    key[len++] = static_cast<uint8_t>('0' + resample % 10);
+    len = append_decimal(key, len, resample);
 
     double num = seed_pseudohash(seed, len);
     for (int i = static_cast<int>(len) - 1; i >= 0; --i) {
@@ -316,8 +359,7 @@ static __device__ uint32_t randchoice_tag(
         idx = lua_randint(seed_value, 0, 23);
         item = TAG_POOL[idx];
         if (!(item == 312 || item == 319 || item == 321 || item == 322 || item == 323 ||
-              item == 324 || item == 325 || item == 330 || item == 332) ||
-            resample > 1000) {
+              item == 324 || item == 325 || item == 330 || item == 332)) {
             return item;
         }
     }
@@ -329,8 +371,18 @@ static __device__ uint32_t next_voucher(const SeedState& seed, double hashed_see
     double seed_value = advance_node(&node, hashed_seed);
     int idx = lua_randint(seed_value, 0, 31);
     uint32_t item = VOUCHER_POOL[idx];
-    if (item != 0) {
+    if (item != 0 && (item - 162) % 2 == 0) {
         return item;
+    }
+
+    for (int resample = 2; resample <= 1000; ++resample) {
+        node = initial_node_voucher1_resample(seed, resample);
+        seed_value = advance_node(&node, hashed_seed);
+        idx = lua_randint(seed_value, 0, 31);
+        item = VOUCHER_POOL[idx];
+        if (item != 0 && (item - 162) % 2 == 0) {
+            return item;
+        }
     }
     return item;
 }
@@ -349,52 +401,220 @@ static __device__ uint32_t roll_second_pack(const SeedState& seed, double hashed
     return PACK_ITEMS[15];
 }
 
-static __device__ bool passes_filter(int64_t seed_id, const CudaFilterParams* params) {
-    SeedState seed = seed_from_id(seed_id);
+static __device__ bool second_pack_is(const SeedState& seed, double hashed_seed, uint32_t target) {
+    double node = initial_node_shop_pack1(seed);
+    double seed_value = advance_node(&node, hashed_seed);
+    double poll = lua_random(seed_value) * PACK_WEIGHTS[0];
+    switch (target) {
+        case 298: return poll > 12.5 && poll <= 13.0;
+        case 305: return poll > 21.45 && poll <= 22.05;
+        case 306: return poll > 22.05 && poll <= 22.35;
+        case 307: return poll > 22.35 && poll <= 22.42;
+        default: {
+            double weight = 0.0;
+            for (int i = 1; i < 16; ++i) {
+                weight += PACK_WEIGHTS[i];
+                if (weight >= poll) {
+                    return PACK_ITEMS[i] == target;
+                }
+            }
+            return PACK_ITEMS[15] == target;
+        }
+    }
+}
+
+static __device__ int pack_size(uint32_t pack) {
+    switch (pack) {
+        case 293: return 3;
+        case 294:
+        case 295: return 5;
+        case 305: return 2;
+        case 306:
+        case 307: return 4;
+        default: return 0;
+    }
+}
+
+static __device__ bool spectral_pack_contains_soul_size(
+    const SeedState& seed,
+    double hashed_seed,
+    int size
+);
+
+static __device__ bool pack_contains_soul(
+    const SeedState& seed,
+    double hashed_seed,
+    uint32_t pack
+) {
+    int size = pack_size(pack);
+    if (size <= 0) {
+        return false;
+    }
+
+    if (pack >= 293 && pack <= 295) {
+        double node = initial_node_soul_tarot1(seed);
+        for (int i = 0; i < size; ++i) {
+            double seed_value = advance_node(&node, hashed_seed);
+            if (lua_random(seed_value) > 0.997) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    return spectral_pack_contains_soul_size(seed, hashed_seed, size);
+}
+
+static __device__ bool spectral_pack_contains_soul_size(
+    const SeedState& seed,
+    double hashed_seed,
+    int size
+) {
+    double node = initial_node_soul_spectral1(seed);
+    bool black_hole_locked = false;
+    for (int i = 0; i < size; ++i) {
+        uint32_t forced = 0;
+        double seed_value = advance_node(&node, hashed_seed);
+        if (lua_random(seed_value) > 0.997) {
+            forced = 264;
+        }
+        if (!black_hole_locked) {
+            seed_value = advance_node(&node, hashed_seed);
+            if (lua_random(seed_value) > 0.997) {
+                forced = 265;
+            }
+        }
+        if (forced == 264) {
+            return true;
+        }
+        if (forced == 265) {
+            black_hole_locked = true;
+        }
+    }
+    return false;
+}
+
+static __device__ int spectral_pack_size(uint32_t pack) {
+    switch (pack) {
+        case 305: return 2;
+        case 306:
+        case 307: return 4;
+        default: return 0;
+    }
+}
+
+static __device__ bool tags_match_after_rolls(
+    const SeedState& seed,
+    double hashed_seed,
+    uint32_t tag1,
+    uint32_t tag2
+) {
+    double tag_node = initial_node_tag1(seed);
+    int first_resample_max = 1;
+    uint32_t small = randchoice_tag(seed, hashed_seed, &tag_node, 1, &first_resample_max);
+    int second_resample_max = first_resample_max;
+    uint32_t big = randchoice_tag(seed, hashed_seed, &tag_node, first_resample_max, &second_resample_max);
+    if (tag1 == 0 && tag2 != 0) {
+        return small == tag2 || big == tag2;
+    }
+    if (tag2 == 0 && tag1 != 0) {
+        return small == tag1 || big == tag1;
+    }
+    if (tag1 != 0 && tag2 != 0 && tag1 != tag2) {
+        bool has_tag1 = small == tag1 || big == tag1;
+        bool has_tag2 = small == tag2 || big == tag2;
+        return has_tag1 && has_tag2;
+    }
+    if (tag1 != 0) {
+        return small == tag1 && big == tag1;
+    }
+    return true;
+}
+
+static __device__ bool passes_filter(int64_t seed_id, const CudaFilterParams& params) {
+    SeedState seed = seed_from_normalized_id(static_cast<uint64_t>(seed_id));
+    double hashed_seed = seed_pseudohash(seed, 0);
+    uint32_t pack1 = 302; // First ante-1 shop slot is Buffoon Pack in the Rust CPU path.
+    uint32_t pack2 = 0;
+    bool pack2_known = false;
+
+    if (params.flags & FLAG_OBSERVATORY) {
+        if (!second_pack_is(seed, hashed_seed, 298)) return false;
+        uint32_t first_voucher = next_voucher(seed, hashed_seed);
+        if (first_voucher != 172) return false;
+    } else {
+        if (params.flags & FLAG_PACKS) {
+            if (params.pack != 0 && pack1 != params.pack) {
+                if (!second_pack_is(seed, hashed_seed, params.pack)) {
+                    return false;
+                }
+                pack2 = params.pack;
+                pack2_known = true;
+            } else {
+                pack2 = roll_second_pack(seed, hashed_seed);
+                pack2_known = true;
+                if (params.pack != 0 && pack1 != params.pack && pack2 != params.pack) {
+                    return false;
+                }
+            }
+        }
+
+        if (params.flags & FLAG_VOUCHER) {
+            uint32_t first_voucher = next_voucher(seed, hashed_seed);
+            if (params.voucher != 0 && first_voucher != params.voucher) {
+                return false;
+            }
+        }
+
+        if (params.flags & FLAG_SOULS) {
+            if (!pack2_known) {
+                pack2 = roll_second_pack(seed, hashed_seed);
+            }
+            if (params.pack != 0) {
+                uint32_t selected_pack = params.pack == pack1 ? pack1 : pack2;
+                if (!pack_contains_soul(seed, hashed_seed, selected_pack)) {
+                    return false;
+                }
+            } else if (!pack_contains_soul(seed, hashed_seed, pack2)) {
+                return false;
+            }
+        }
+    }
+
+    if (params.flags & FLAG_TAGS) {
+        if (!tags_match_after_rolls(seed, hashed_seed, params.tag1, params.tag2)) return false;
+    }
+
+    return true;
+}
+
+static __device__ bool passes_spectral_soul_filter(
+    int64_t seed_id,
+    const CudaFilterParams& params
+) {
+    SeedState seed = seed_from_normalized_id(static_cast<uint64_t>(seed_id));
     double hashed_seed = seed_pseudohash(seed, 0);
 
-    if (params->flags & FLAG_TAGS) {
-        double tag_node = initial_node_tag1(seed);
-        int first_resample_max = 1;
-        uint32_t small = randchoice_tag(seed, hashed_seed, &tag_node, 1, &first_resample_max);
-        int second_resample_max = first_resample_max;
-        uint32_t big = randchoice_tag(seed, hashed_seed, &tag_node, first_resample_max, &second_resample_max);
-        uint32_t tag1 = params->tag1;
-        uint32_t tag2 = params->tag2;
-        if (tag1 == 0 && tag2 != 0) {
-            if (small != tag2 && big != tag2) return false;
-        } else if (tag2 == 0 && tag1 != 0) {
-            if (small != tag1 && big != tag1) return false;
-        } else if (tag1 != 0 && tag2 != 0 && tag1 != tag2) {
-            bool has_tag1 = small == tag1 || big == tag1;
-            bool has_tag2 = small == tag2 || big == tag2;
-            if (!has_tag1 || !has_tag2) return false;
-        } else if (tag1 != 0) {
-            if (small != tag1 || big != tag1) return false;
-        }
+    if (!second_pack_is(seed, hashed_seed, params.pack)) {
+        return false;
     }
 
-    uint32_t first_voucher = 0;
-    if (params->flags & FLAG_VOUCHER) {
-        first_voucher = next_voucher(seed, hashed_seed);
-        if (params->voucher != 0 && first_voucher != params->voucher) {
+    if (params.flags & FLAG_VOUCHER) {
+        uint32_t first_voucher = next_voucher(seed, hashed_seed);
+        if (params.voucher != 0 && first_voucher != params.voucher) {
             return false;
         }
     }
 
-    uint32_t pack1 = 0;
-    uint32_t pack2 = 0;
-    if (params->flags & FLAG_PACKS) {
-        pack1 = 302; // First ante-1 shop slot is Buffoon Pack in the current CPU oracle.
-        pack2 = roll_second_pack(seed, hashed_seed);
-        if (params->pack != 0 && pack1 != params->pack && pack2 != params->pack) {
-            return false;
-        }
+    int size = spectral_pack_size(params.pack);
+    if (size <= 0 || !spectral_pack_contains_soul_size(seed, hashed_seed, size)) {
+        return false;
     }
 
-    if (params->flags & FLAG_OBSERVATORY) {
-        if (first_voucher != 172) return false;
-        if (pack1 != 298 && pack2 != 298) return false;
+    if (params.flags & FLAG_TAGS) {
+        if (!tags_match_after_rolls(seed, hashed_seed, params.tag1, params.tag2)) {
+            return false;
+        }
     }
 
     return true;
@@ -403,7 +623,7 @@ static __device__ bool passes_filter(int64_t seed_id, const CudaFilterParams* pa
 extern "C" __global__ void brainstorm_search_kernel(
     int64_t start_seed,
     int64_t count,
-    const CudaFilterParams* params,
+    CudaFilterParams params,
     uint64_t* best_offset
 ) {
     uint64_t tid = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -413,13 +633,33 @@ extern "C" __global__ void brainstorm_search_kernel(
     for (uint64_t offset = tid; offset < n; offset += stride) {
         uint64_t current_best = *best_offset;
         if (offset >= current_best) {
-            continue;
+            break;
         }
-        int64_t seed_id = (start_seed + static_cast<int64_t>(offset)) % SEED_SPACE;
-        if (seed_id < 0) {
-            seed_id += SEED_SPACE;
-        }
+        int64_t seed_id = start_seed + static_cast<int64_t>(offset);
         if (passes_filter(seed_id, params)) {
+            atomicMin(reinterpret_cast<unsigned long long*>(best_offset),
+                      static_cast<unsigned long long>(offset));
+        }
+    }
+}
+
+extern "C" __global__ void brainstorm_search_spectral_soul_kernel(
+    int64_t start_seed,
+    int64_t count,
+    CudaFilterParams params,
+    uint64_t* best_offset
+) {
+    uint64_t tid = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    uint64_t stride = static_cast<uint64_t>(gridDim.x) * blockDim.x;
+    uint64_t n = static_cast<uint64_t>(count);
+
+    for (uint64_t offset = tid; offset < n; offset += stride) {
+        uint64_t current_best = *best_offset;
+        if (offset >= current_best) {
+            break;
+        }
+        int64_t seed_id = start_seed + static_cast<int64_t>(offset);
+        if (passes_spectral_soul_filter(seed_id, params)) {
             atomicMin(reinterpret_cast<unsigned long long*>(best_offset),
                       static_cast<unsigned long long>(offset));
         }

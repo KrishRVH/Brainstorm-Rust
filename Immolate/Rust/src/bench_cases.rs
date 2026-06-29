@@ -83,18 +83,27 @@ pub struct BenchCase {
 pub fn selected_bench_cases(selected: &str) -> Result<Vec<BenchCase>, String> {
     let mut cases = bench_cases();
     if selected == "all" {
+        cases.retain(|case| !is_cuda_long_case(case));
         return Ok(cases);
     }
 
-    cases.retain(|case| case.name == selected || case.group.key() == selected);
+    cases.retain(|case| {
+        case.name == selected
+            || (selected == "cuda-long" && is_cuda_long_case(case))
+            || (!is_cuda_long_case(case) && case.group.key() == selected)
+    });
     if cases.is_empty() {
         Err(format!(
-            "unknown benchmark case or group: {selected}. Use all, {}, or an exact case name.",
+            "unknown benchmark case or group: {selected}. Use all, cuda-long, {}, or an exact case name.",
             bench_group_keys().join(", ")
         ))
     } else {
         Ok(cases)
     }
+}
+
+fn is_cuda_long_case(case: &BenchCase) -> bool {
+    case.name.starts_with("cuda-long-")
 }
 
 pub fn bench_group_keys() -> Vec<&'static str> {
@@ -944,6 +953,69 @@ pub fn bench_cases() -> Vec<BenchCase> {
             joker: "",
             joker_location: "any",
             souls: 0.0,
+            observatory: false,
+            perkeo: false,
+            deck: "b_red",
+            erratic: false,
+            no_faces: false,
+            min_face_cards: 0,
+            suit_ratio: 0.0,
+        },
+        BenchCase {
+            name: "cuda-long-spectral-soul-legacy-tag",
+            group: BenchGroup::Ux,
+            shape: BenchShape::Mixed,
+            note: "CUDA-supported legacy-representable tag+voucher Spectral Soul long scan",
+            seed_start: "OQMKIM11",
+            voucher: "v_telescope",
+            pack: "p_spectral_mega_1",
+            tag1: "tag_charm",
+            tag2: "",
+            joker: "",
+            joker_location: "any",
+            souls: 1.0,
+            observatory: false,
+            perkeo: false,
+            deck: "b_red",
+            erratic: false,
+            no_faces: false,
+            min_face_cards: 0,
+            suit_ratio: 0.0,
+        },
+        BenchCase {
+            name: "cuda-long-spectral-soul-tag",
+            group: BenchGroup::Ux,
+            shape: BenchShape::Mixed,
+            note: "CUDA-supported Red Deck tag plus Spectral Soul scan sized for tens of millions of seeds",
+            seed_start: "PQTP4311",
+            voucher: "",
+            pack: "p_spectral_mega_1",
+            tag1: "tag_charm",
+            tag2: "tag_charm",
+            joker: "",
+            joker_location: "any",
+            souls: 1.0,
+            observatory: false,
+            perkeo: false,
+            deck: "b_red",
+            erratic: false,
+            no_faces: false,
+            min_face_cards: 0,
+            suit_ratio: 0.0,
+        },
+        BenchCase {
+            name: "cuda-long-spectral-soul-voucher-tag",
+            group: BenchGroup::Ux,
+            shape: BenchShape::Miss,
+            note: "CUDA-supported Red Deck tag+voucher plus Spectral Soul full-budget scan",
+            seed_start: "",
+            voucher: "v_telescope",
+            pack: "p_spectral_mega_1",
+            tag1: "tag_charm",
+            tag2: "tag_charm",
+            joker: "",
+            joker_location: "any",
+            souls: 1.0,
             observatory: false,
             perkeo: false,
             deck: "b_red",

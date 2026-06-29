@@ -46,6 +46,7 @@ const FLAG_TAGS: u32 = 1 << 0;
 const FLAG_VOUCHER: u32 = 1 << 1;
 const FLAG_PACKS: u32 = 1 << 2;
 const FLAG_OBSERVATORY: u32 = 1 << 3;
+const FLAG_SOULS: u32 = 1 << 4;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CudaSearch {
@@ -56,6 +57,13 @@ pub enum CudaSearch {
 
 pub fn set_cuda_enabled(enabled: bool) {
     CUDA_ENABLED.store(enabled, Ordering::Relaxed);
+    if enabled {
+        if let Some(state) = CUDA_STATE.get() {
+            if let Ok(mut guard) = state.lock() {
+                guard.disabled = false;
+            }
+        }
+    }
 }
 
 pub fn search_cuda(seed_start: &str, cfg: &CompiledFilter, num_seeds: i64) -> CudaSearch {
@@ -109,9 +117,10 @@ pub fn debug_seed_cuda(seed_id: i64) -> Option<[u64; 8]> {
 fn compile_cuda_filter(cfg: &CompiledFilter) -> Option<CudaFilterParams> {
     if cfg.raw.deck != Item::Red_Deck
         || cfg.raw.joker != Item::RETRY
-        || cfg.raw.souls > 0
+        || cfg.raw.souls > 1
         || cfg.raw.perkeo
         || cfg.raw.erratic
+        || (cfg.raw.souls > 0 && cfg.raw.observatory)
     {
         return None;
     }
@@ -121,6 +130,8 @@ fn compile_cuda_filter(cfg: &CompiledFilter) -> Option<CudaFilterParams> {
         | KernelShape::VoucherOnly
         | KernelShape::PackOnly
         | KernelShape::Observatory
+        | KernelShape::TagObservatory
+        | KernelShape::Souls
         | KernelShape::Composite => {},
         _ => return None,
     }
@@ -132,11 +143,14 @@ fn compile_cuda_filter(cfg: &CompiledFilter) -> Option<CudaFilterParams> {
     if cfg.raw.voucher != Item::RETRY || cfg.raw.observatory {
         flags |= FLAG_VOUCHER;
     }
-    if cfg.raw.pack != Item::RETRY || cfg.raw.observatory {
+    if (cfg.raw.pack != Item::RETRY && cfg.raw.pack != Item::Buffoon_Pack) || cfg.raw.observatory {
         flags |= FLAG_PACKS;
     }
     if cfg.raw.observatory {
         flags |= FLAG_OBSERVATORY;
+    }
+    if cfg.raw.souls > 0 {
+        flags |= FLAG_SOULS;
     }
 
     if flags == 0 {
@@ -178,8 +192,8 @@ struct CudaEngine {
     context: CUcontext,
     module: CUmodule,
     kernel: CUfunction,
+    spectral_soul_kernel: CUfunction,
     debug_kernel: CUfunction,
-    d_params: CUdeviceptr,
     d_best_offset: CUdeviceptr,
     d_debug: CUdeviceptr,
 }
@@ -222,6 +236,13 @@ impl CudaEngine {
                 module,
                 kernel_name.as_ptr(),
             ))?;
+            let spectral_soul_kernel_name = c"brainstorm_search_spectral_soul_kernel";
+            let mut spectral_soul_kernel = ptr::null_mut();
+            check((driver.cu_module_get_function)(
+                &raw mut spectral_soul_kernel,
+                module,
+                spectral_soul_kernel_name.as_ptr(),
+            ))?;
             let debug_kernel_name = c"brainstorm_debug_seed_kernel";
             let mut debug_kernel = ptr::null_mut();
             check((driver.cu_module_get_function)(
@@ -230,13 +251,8 @@ impl CudaEngine {
                 debug_kernel_name.as_ptr(),
             ))?;
 
-            let mut d_params = 0;
             let mut d_best_offset = 0;
             let mut d_debug = 0;
-            check((driver.cu_mem_alloc)(
-                &raw mut d_params,
-                mem::size_of::<CudaFilterParams>(),
-            ))?;
             check((driver.cu_mem_alloc)(
                 &raw mut d_best_offset,
                 mem::size_of::<u64>(),
@@ -251,8 +267,8 @@ impl CudaEngine {
                 context,
                 module,
                 kernel,
+                spectral_soul_kernel,
                 debug_kernel,
-                d_params,
                 d_best_offset,
                 d_debug,
             })
@@ -274,16 +290,12 @@ impl CudaEngine {
 
         unsafe {
             check((self.driver.cu_ctx_set_current)(self.context))?;
-            check((self.driver.cu_memcpy_htod)(
-                self.d_params,
-                ptr::from_ref(params).cast(),
-                mem::size_of::<CudaFilterParams>(),
-            ))?;
         }
 
         while remaining > 0 {
-            let count = remaining.min(launch_seeds);
-            let found = self.search_launch(start_seed, count)?;
+            let until_wrap = SEED_SPACE - start_seed;
+            let count = remaining.min(launch_seeds).min(until_wrap);
+            let found = self.search_launch(start_seed, count, params)?;
             if let Some(offset) = found {
                 let id = (start_seed + i64::try_from(offset).unwrap_or(0)).rem_euclid(SEED_SPACE);
                 return Ok(Some(Seed::from_id(id).to_string()));
@@ -294,7 +306,12 @@ impl CudaEngine {
         Ok(None)
     }
 
-    fn search_launch(&mut self, start_seed: i64, count: i64) -> Result<Option<u64>, CudaError> {
+    fn search_launch(
+        &mut self,
+        start_seed: i64,
+        count: i64,
+        params: &CudaFilterParams,
+    ) -> Result<Option<u64>, CudaError> {
         let mut best_offset = NO_RESULT;
         unsafe {
             check((self.driver.cu_memcpy_htod)(
@@ -305,7 +322,7 @@ impl CudaEngine {
 
             let mut start_seed_arg = start_seed;
             let mut count_arg = count;
-            let mut params_arg = self.d_params;
+            let mut params_arg = *params;
             let mut best_arg = self.d_best_offset;
             let mut args = [
                 ptr::from_mut(&mut start_seed_arg).cast::<c_void>(),
@@ -313,10 +330,11 @@ impl CudaEngine {
                 ptr::from_mut(&mut params_arg).cast::<c_void>(),
                 ptr::from_mut(&mut best_arg).cast::<c_void>(),
             ];
+            let kernel = self.search_kernel(params);
 
             check((self.driver.cu_launch_kernel)(
-                self.kernel,
-                GRID_SIZE,
+                kernel,
+                launch_grid_size(count),
                 1,
                 1,
                 BLOCK_SIZE,
@@ -327,7 +345,6 @@ impl CudaEngine {
                 args.as_mut_ptr(),
                 ptr::null_mut(),
             ))?;
-            check((self.driver.cu_ctx_synchronize)())?;
             check((self.driver.cu_memcpy_dtoh)(
                 ptr::from_mut(&mut best_offset).cast(),
                 self.d_best_offset,
@@ -374,15 +391,35 @@ impl CudaEngine {
         }
         Ok(out)
     }
+
+    fn search_kernel(&self, params: &CudaFilterParams) -> CUfunction {
+        if use_spectral_soul_kernel(params) {
+            self.spectral_soul_kernel
+        } else {
+            self.kernel
+        }
+    }
+}
+
+fn use_spectral_soul_kernel(params: &CudaFilterParams) -> bool {
+    let allowed_flags = FLAG_TAGS | FLAG_VOUCHER | FLAG_PACKS | FLAG_SOULS;
+    params.flags & !allowed_flags == 0
+        && params.flags & FLAG_PACKS != 0
+        && params.flags & FLAG_SOULS != 0
+        && matches!(params.pack, 305..=307)
+}
+
+fn launch_grid_size(count: i64) -> u32 {
+    let count = u64::try_from(count).unwrap_or(0).max(1);
+    let block_size = u64::from(BLOCK_SIZE);
+    let blocks = count.div_ceil(block_size);
+    u32::try_from(blocks.min(u64::from(GRID_SIZE))).unwrap_or(GRID_SIZE)
 }
 
 impl Drop for CudaEngine {
     fn drop(&mut self) {
         unsafe {
             let _ = (self.driver.cu_ctx_set_current)(self.context);
-            if self.d_params != 0 {
-                let _ = (self.driver.cu_mem_free)(self.d_params);
-            }
             if self.d_best_offset != 0 {
                 let _ = (self.driver.cu_mem_free)(self.d_best_offset);
             }
@@ -600,4 +637,282 @@ unsafe extern "C" {
     fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
     fn dlclose(handle: *mut c_void) -> c_int;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::filters::FilterConfig;
+
+    #[test]
+    fn cuda_filter_compilation_matches_supported_surface() {
+        assert_cuda_supported(raw_cfg(
+            "",
+            "",
+            "tag_charm",
+            "",
+            "",
+            0.0,
+            false,
+            false,
+            "b_red",
+            false,
+        ));
+        assert_cuda_supported(raw_cfg(
+            "v_telescope",
+            "",
+            "",
+            "",
+            "",
+            0.0,
+            false,
+            false,
+            "b_red",
+            false,
+        ));
+        assert_cuda_supported(raw_cfg(
+            "",
+            "p_spectral_mega_1",
+            "",
+            "",
+            "",
+            0.0,
+            false,
+            false,
+            "b_red",
+            false,
+        ));
+        assert_cuda_supported(raw_cfg(
+            "", "", "", "", "", 0.0, true, false, "b_red", false,
+        ));
+        assert_cuda_supported(raw_cfg(
+            "",
+            "",
+            "tag_charm",
+            "",
+            "",
+            0.0,
+            true,
+            false,
+            "b_red",
+            false,
+        ));
+        assert_cuda_supported(raw_cfg(
+            "v_telescope",
+            "p_spectral_mega_1",
+            "tag_charm",
+            "",
+            "",
+            0.0,
+            false,
+            false,
+            "b_red",
+            false,
+        ));
+        assert_cuda_supported(raw_cfg(
+            "v_telescope",
+            "p_spectral_mega_1",
+            "tag_charm",
+            "",
+            "",
+            1.0,
+            false,
+            false,
+            "b_red",
+            false,
+        ));
+
+        assert_cuda_unsupported(FilterConfig::default());
+        assert_cuda_unsupported(raw_cfg(
+            "",
+            "",
+            "",
+            "",
+            "Blueprint",
+            0.0,
+            false,
+            false,
+            "b_red",
+            false,
+        ));
+        assert_cuda_unsupported(raw_cfg(
+            "",
+            "p_arcana_mega_1",
+            "",
+            "",
+            "",
+            2.0,
+            false,
+            false,
+            "b_red",
+            false,
+        ));
+        assert_cuda_unsupported(raw_cfg(
+            "", "", "", "", "", 1.0, true, false, "b_red", false,
+        ));
+        assert_cuda_unsupported(raw_cfg(
+            "", "", "", "", "", 0.0, false, true, "b_red", false,
+        ));
+        assert_cuda_unsupported(raw_cfg(
+            "",
+            "",
+            "",
+            "",
+            "",
+            0.0,
+            false,
+            false,
+            "b_erratic",
+            true,
+        ));
+        assert_cuda_unsupported(raw_cfg(
+            "v_telescope",
+            "",
+            "",
+            "",
+            "",
+            0.0,
+            false,
+            false,
+            "b_magic",
+            false,
+        ));
+    }
+
+    #[test]
+    fn cuda_elides_always_true_first_buffoon_pack_constraint() {
+        let tag_and_buffoon = raw_cfg(
+            "",
+            "p_buffoon_normal_1",
+            "tag_charm",
+            "",
+            "",
+            0.0,
+            false,
+            false,
+            "b_red",
+            false,
+        );
+        let params = compile_cuda_filter(&CompiledFilter::compile(&tag_and_buffoon))
+            .expect("tag plus Buffoon pack should still use CUDA for the tag check");
+        assert_eq!(params.flags & FLAG_TAGS, FLAG_TAGS);
+        assert_eq!(params.flags & FLAG_PACKS, 0);
+
+        assert_cuda_unsupported(raw_cfg(
+            "",
+            "p_buffoon_normal_1",
+            "",
+            "",
+            "",
+            0.0,
+            false,
+            false,
+            "b_red",
+            false,
+        ));
+    }
+
+    #[test]
+    fn cuda_launch_grid_scales_with_count_and_caps_at_max_grid() {
+        assert_eq!(launch_grid_size(1), 1);
+        assert_eq!(launch_grid_size(i64::from(BLOCK_SIZE)), 1);
+        assert_eq!(launch_grid_size(i64::from(BLOCK_SIZE) + 1), 2);
+        assert_eq!(
+            launch_grid_size(i64::from(BLOCK_SIZE) * i64::from(GRID_SIZE) * 2),
+            GRID_SIZE,
+        );
+    }
+
+    #[test]
+    fn cuda_uses_specialized_kernel_only_for_selected_spectral_soul_filters() {
+        let spectral = compile_cuda_filter(&CompiledFilter::compile(&raw_cfg(
+            "v_telescope",
+            "p_spectral_mega_1",
+            "tag_charm",
+            "tag_charm",
+            "",
+            1.0,
+            false,
+            false,
+            "b_red",
+            false,
+        )))
+        .expect("selected Spectral Soul filter should compile for CUDA");
+        assert!(use_spectral_soul_kernel(&spectral));
+
+        let arcana = compile_cuda_filter(&CompiledFilter::compile(&raw_cfg(
+            "",
+            "p_arcana_mega_1",
+            "tag_charm",
+            "",
+            "",
+            1.0,
+            false,
+            false,
+            "b_red",
+            false,
+        )))
+        .expect("selected Arcana Soul filter should compile for CUDA");
+        assert!(!use_spectral_soul_kernel(&arcana));
+
+        let observatory = compile_cuda_filter(&CompiledFilter::compile(&raw_cfg(
+            "",
+            "",
+            "tag_charm",
+            "",
+            "",
+            0.0,
+            true,
+            false,
+            "b_red",
+            false,
+        )))
+        .expect("tag Observatory filter should compile for CUDA");
+        assert!(!use_spectral_soul_kernel(&observatory));
+    }
+
+    fn assert_cuda_supported(cfg: FilterConfig) {
+        assert!(
+            compile_cuda_filter(&CompiledFilter::compile(&cfg)).is_some(),
+            "{cfg:?} should compile for CUDA",
+        );
+    }
+
+    fn assert_cuda_unsupported(cfg: FilterConfig) {
+        assert!(
+            compile_cuda_filter(&CompiledFilter::compile(&cfg)).is_none(),
+            "{cfg:?} should use the Rust CPU path",
+        );
+    }
+
+    fn raw_cfg(
+        voucher: &str,
+        pack: &str,
+        tag1: &str,
+        tag2: &str,
+        joker: &str,
+        souls: f64,
+        observatory: bool,
+        perkeo: bool,
+        deck: &str,
+        erratic: bool,
+    ) -> FilterConfig {
+        FilterConfig::from_raw(
+            voucher,
+            pack,
+            tag1,
+            tag2,
+            joker,
+            "any",
+            souls,
+            observatory,
+            perkeo,
+            deck,
+            erratic,
+            false,
+            0,
+            0.0,
+        )
+    }
 }

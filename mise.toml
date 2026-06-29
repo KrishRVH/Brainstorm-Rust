@@ -4,7 +4,6 @@ stylua = "2.3.1"
 
 [env]
 IMMO_DIR = "Immolate"
-CPP_DIR = "Immolate/CPP"
 RUST_DIR = "Immolate/Rust"
 DLL = "Immolate.dll"
 RELEASE_DIR = "release/Brainstorm_v3.1"
@@ -68,8 +67,7 @@ check_cmd stylua
 check_cmd luajit
 check_cmd luarocks
 check_cmd luacheck
-check_cmd clang-format
-check_cmd x86_64-w64-mingw32-g++
+check_cmd x86_64-w64-mingw32-gcc
 check_cmd x86_64-w64-mingw32-objdump
 check_cmd wine
 check_cmd nvcc
@@ -90,41 +88,6 @@ exit "$missing"
 [tasks.build]
 description = "Build the default Rust Immolate.dll"
 run = "mise run build-rust"
-
-[tasks.build-cpp]
-description = "Build the C++ oracle DLL"
-shell = "bash -c"
-run = '''
-set -euo pipefail
-cpp_dll="$TARGET_DIR/cpp/$DLL"
-sources=(
-  "$CPP_DIR/brainstorm.cpp"
-  "$CPP_DIR/functions.cpp"
-  "$CPP_DIR/rng.cpp"
-  "$CPP_DIR/seed.cpp"
-  "$CPP_DIR/util.cpp"
-)
-
-echo "Building $DLL"
-if ! command -v x86_64-w64-mingw32-g++ >/dev/null; then
-  echo "x86_64-w64-mingw32-g++ not found. Install mingw-w64."
-  exit 1
-fi
-
-mkdir -p "$TARGET_DIR/cpp"
-x86_64-w64-mingw32-g++ \
-  -shared \
-  -O3 \
-  -std=c++17 \
-  -DBUILDING_DLL \
-  -o "$cpp_dll" \
-  "${sources[@]}" \
-  -I "$CPP_DIR" \
-  -static-libgcc \
-  -static-libstdc++ \
-  -Wl,--export-all-symbols
-cp "$cpp_dll" "$DLL"
-'''
 
 [tasks.build-rust]
 description = "Build the Rust DLL and copy it to target/rust and repo root"
@@ -197,7 +160,7 @@ file "$rust_artifact" | grep -Eq 'PE32\+.*x86-64' || {
 
 exports="$(
   x86_64-w64-mingw32-objdump -p "$rust_artifact" |
-    sed -n '/^\[Ordinal\/Name Pointer\] Table$/,/^$/p' |
+    sed -n '/^\[Ordinal\/Name Pointer\] Table/,/^$/p' |
     awk '/\[[[:space:]]*[0-9]+\]/{print $NF}'
 )"
 expected="$(printf '%s\n' brainstorm_search free_result immolate_last_error immolate_set_cuda_enabled immolate_set_log_path | sort)"
@@ -217,24 +180,8 @@ done
 '''
 
 [tasks.compare]
-description = "Compare C++ and Rust DLL ABI results under Wine"
-shell = "bash -c"
-run = '''
-set -euo pipefail
-mise run build-cpp
-mise run build-rust
-mise run build-harness
-
-cpp_dll="$TARGET_DIR/cpp/$DLL"
-rust_artifact="$TARGET_DIR/rust/$DLL"
-rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
-harness="$RUST_DIR/target/$rust_target/release/immolate_dll_harness.exe"
-
-wine "$harness" compare \
-  --cpp "$(winepath -w "$(readlink -f "$cpp_dll")")" \
-  --rust "$(winepath -w "$(readlink -f "$rust_artifact")")" \
-  --threads 1
-'''
+description = "Alias for bench-compare"
+run = "mise run bench-compare"
 
 [tasks.bench]
 description = "Benchmark the Rust DLL under Wine"
@@ -253,9 +200,10 @@ rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
 harness="$RUST_DIR/target/$rust_target/release/immolate_dll_harness.exe"
 bench_case="${BENCH_CASE:-all}"
 bench_budget="${BENCH_BUDGET:-1000000}"
-bench_threads="${BENCH_THREADS:-1}"
+bench_threads="${BENCH_THREADS:-0}"
 bench_repeat="${BENCH_REPEAT:-5}"
 bench_warmup="${BENCH_WARMUP:-1}"
+bench_cuda="${BENCH_CUDA:-default}"
 bench_format="${BENCH_FORMAT:-pretty}"
 bench_color="${BENCH_COLOR:-auto}"
 wine "$harness" bench \
@@ -265,76 +213,147 @@ wine "$harness" bench \
   --threads "$bench_threads" \
   --repeat "$bench_repeat" \
   --warmup "$bench_warmup" \
-  --format "$bench_format" \
-  --color "$bench_color"
-'''
-
-[tasks.bench-cpp]
-description = "Benchmark the C++ oracle DLL under Wine"
-shell = "bash -c"
-run = '''
-set -euo pipefail
-mise run build-cpp
-mise run build-harness
-
-cpp_dll="$TARGET_DIR/cpp/$DLL"
-rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
-harness="$RUST_DIR/target/$rust_target/release/immolate_dll_harness.exe"
-bench_case="${BENCH_CASE:-all}"
-bench_budget="${BENCH_BUDGET:-1000000}"
-bench_threads="${BENCH_THREADS:-1}"
-bench_repeat="${BENCH_REPEAT:-5}"
-bench_warmup="${BENCH_WARMUP:-1}"
-bench_format="${BENCH_FORMAT:-pretty}"
-bench_color="${BENCH_COLOR:-auto}"
-wine "$harness" bench \
-  --dll "$(winepath -w "$(readlink -f "$cpp_dll")")" \
-  --case "$bench_case" \
-  --budget "$bench_budget" \
-  --threads "$bench_threads" \
-  --repeat "$bench_repeat" \
-  --warmup "$bench_warmup" \
+  --cuda "$bench_cuda" \
   --format "$bench_format" \
   --color "$bench_color"
 '''
 
 [tasks.bench-compare]
-description = "Benchmark C++ vs Rust"
+description = "Benchmark Rust CPU/CUDA against the legacy Original Brainstorm DLL"
 shell = "bash -c"
 run = '''
 set -euo pipefail
-mise run build-cpp
 mise run build-rust
 mise run build-harness
 
-cpp_dll="$TARGET_DIR/cpp/$DLL"
 rust_artifact="$TARGET_DIR/rust/$DLL"
+original_dll="${BENCH_ORIGINAL_DLL:-${ORIGINAL_DLL:-$IMMO_DIR/Immolate-OceanRamenandMathIsFun0.dll}}"
 rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
 harness="$RUST_DIR/target/$rust_target/release/immolate_dll_harness.exe"
 bench_case="${BENCH_CASE:-all}"
 bench_budget="${BENCH_BUDGET:-1000000}"
-bench_threads="${BENCH_THREADS:-1}"
+bench_threads="${BENCH_THREADS:-0}"
 bench_repeat="${BENCH_REPEAT:-5}"
 bench_warmup="${BENCH_WARMUP:-1}"
+bench_cuda="${BENCH_CUDA:-both}"
 bench_min_ratio="${BENCH_MIN_RATIO:-1.0}"
+bench_fail_on_mismatch="${BENCH_FAIL_ON_MISMATCH:-0}"
 bench_format="${BENCH_FORMAT:-pretty}"
 bench_color="${BENCH_COLOR:-auto}"
 
+if [ ! -f "$original_dll" ]; then
+  echo "legacy Original DLL not found: $original_dll"
+  exit 1
+fi
+
 wine "$harness" bench-compare \
-  --cpp "$(winepath -w "$(readlink -f "$cpp_dll")")" \
   --rust "$(winepath -w "$(readlink -f "$rust_artifact")")" \
+  --original "$(winepath -w "$(readlink -f "$original_dll")")" \
   --case "$bench_case" \
   --budget "$bench_budget" \
   --threads "$bench_threads" \
   --repeat "$bench_repeat" \
   --warmup "$bench_warmup" \
+  --cuda "$bench_cuda" \
   --min-ratio "$bench_min_ratio" \
+  --fail-on-mismatch "$bench_fail_on_mismatch" \
   --format "$bench_format" \
   --color "$bench_color"
 '''
 
+[tasks.bench-compare-windows]
+description = "Benchmark Rust CPU/CUDA against the legacy Original DLL as a native Windows process"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+mise run build-rust
+mise run build-harness
+
+powershell="${POWERSHELL_EXE:-powershell.exe}"
+if ! command -v "$powershell" >/dev/null; then
+  powershell="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+fi
+if ! command -v "$powershell" >/dev/null; then
+  echo "powershell.exe not found. Run this task from WSL with Windows interop enabled."
+  exit 1
+fi
+
+rust_artifact="$TARGET_DIR/rust/$DLL"
+original_dll="${BENCH_ORIGINAL_DLL:-${ORIGINAL_DLL:-$IMMO_DIR/Immolate-OceanRamenandMathIsFun0.dll}}"
+rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
+harness="$RUST_DIR/target/$rust_target/release/immolate_dll_harness.exe"
+bench_case="${BENCH_CASE:-all}"
+bench_budget="${BENCH_BUDGET:-1000000}"
+bench_threads="${BENCH_THREADS:-0}"
+bench_repeat="${BENCH_REPEAT:-5}"
+bench_warmup="${BENCH_WARMUP:-1}"
+bench_cuda="${BENCH_CUDA:-both}"
+bench_min_ratio="${BENCH_MIN_RATIO:-1.0}"
+bench_fail_on_mismatch="${BENCH_FAIL_ON_MISMATCH:-0}"
+bench_format="${BENCH_FORMAT:-pretty}"
+bench_color="${BENCH_COLOR:-auto}"
+
+if [ ! -f "$original_dll" ]; then
+  echo "legacy Original DLL not found: $original_dll"
+  exit 1
+fi
+
+export BS_HARNESS_WIN
+export BS_RUST_DLL_WIN
+export BS_ORIGINAL_DLL_WIN
+export BS_CASE="$bench_case"
+export BS_BUDGET="$bench_budget"
+export BS_THREADS="$bench_threads"
+export BS_REPEAT="$bench_repeat"
+export BS_WARMUP="$bench_warmup"
+export BS_CUDA="$bench_cuda"
+export BS_MIN_RATIO="$bench_min_ratio"
+export BS_FAIL_ON_MISMATCH="$bench_fail_on_mismatch"
+export BS_FORMAT="$bench_format"
+export BS_COLOR="$bench_color"
+
+BS_HARNESS_WIN="$(wslpath -w "$(readlink -f "$harness")")"
+BS_RUST_DLL_WIN="$(wslpath -w "$(readlink -f "$rust_artifact")")"
+BS_ORIGINAL_DLL_WIN="$(wslpath -w "$(readlink -f "$original_dll")")"
+export WSLENV="${WSLENV:+$WSLENV:}BS_HARNESS_WIN/w:BS_RUST_DLL_WIN/w:BS_ORIGINAL_DLL_WIN/w:BS_CASE/w:BS_BUDGET/w:BS_THREADS/w:BS_REPEAT/w:BS_WARMUP/w:BS_CUDA/w:BS_MIN_RATIO/w:BS_FAIL_ON_MISMATCH/w:BS_FORMAT/w:BS_COLOR/w"
+
+"$powershell" -NoProfile -ExecutionPolicy Bypass -Command '
+& $env:BS_HARNESS_WIN bench-compare `
+  --rust $env:BS_RUST_DLL_WIN `
+  --original $env:BS_ORIGINAL_DLL_WIN `
+  --case $env:BS_CASE `
+  --budget $env:BS_BUDGET `
+  --threads $env:BS_THREADS `
+  --repeat $env:BS_REPEAT `
+  --warmup $env:BS_WARMUP `
+  --cuda $env:BS_CUDA `
+  --min-ratio $env:BS_MIN_RATIO `
+  --fail-on-mismatch $env:BS_FAIL_ON_MISMATCH `
+  --format $env:BS_FORMAT `
+  --color $env:BS_COLOR
+'
+'''
+
+[tasks.bench-cuda-long-windows]
+description = "Native Windows long CUDA benchmark from WSL"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+BENCH_CASE="${BENCH_CASE:-cuda-long}" \
+BENCH_BUDGET="${BENCH_BUDGET:-25000000}" \
+BENCH_REPEAT="${BENCH_REPEAT:-3}" \
+BENCH_WARMUP="${BENCH_WARMUP:-1}" \
+BENCH_THREADS="${BENCH_THREADS:-0}" \
+BENCH_CUDA="${BENCH_CUDA:-both}" \
+BENCH_FORMAT="${BENCH_FORMAT:-pretty}" \
+BENCH_COLOR="${BENCH_COLOR:-never}" \
+BENCH_MIN_RATIO="${BENCH_MIN_RATIO:-0.0}" \
+BENCH_FAIL_ON_MISMATCH="${BENCH_FAIL_ON_MISMATCH:-0}" \
+mise run bench-compare-windows
+'''
+
 [tasks.bench-full]
-description = "Strict full-suite C++ vs Rust benchmark gate"
+description = "Full-suite Rust CPU/CUDA vs legacy Original benchmark report"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -342,7 +361,8 @@ BENCH_CASE=all \
 BENCH_BUDGET=100000 \
 BENCH_REPEAT=5 \
 BENCH_WARMUP=2 \
-BENCH_THREADS=1 \
+BENCH_THREADS=0 \
+BENCH_CUDA=both \
 BENCH_FORMAT=tsv \
 BENCH_COLOR=never \
 BENCH_MIN_RATIO=1.0 \
@@ -350,7 +370,7 @@ mise run bench-compare
 '''
 
 [tasks.bench-ux]
-description = "Strict actual Lua UI UX benchmark gate"
+description = "Strict DLL UX benchmark gate"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -359,6 +379,7 @@ BENCH_BUDGET=100000 \
 BENCH_REPEAT=5 \
 BENCH_WARMUP=2 \
 BENCH_THREADS=0 \
+BENCH_CUDA=both \
 BENCH_FORMAT=tsv \
 BENCH_COLOR=never \
 BENCH_MIN_RATIO=1.0 \
@@ -374,7 +395,8 @@ BENCH_CASE=all \
 BENCH_BUDGET=1000000 \
 BENCH_REPEAT=7 \
 BENCH_WARMUP=2 \
-BENCH_THREADS=1 \
+BENCH_THREADS=0 \
+BENCH_CUDA=both \
 BENCH_FORMAT=pretty \
 BENCH_COLOR=always \
 BENCH_MIN_RATIO=1.0 \
@@ -382,7 +404,7 @@ mise run bench-compare
 '''
 
 [tasks.check-rust]
-description = "Run Rust format, clippy, tests, DLL validation, compare, and benchmark smoke"
+description = "Run Rust format, clippy, tests, DLL validation, and benchmark smoke"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -390,12 +412,35 @@ mise run fmt-rust-check
 mise run clippy-rust
 mise run test-rust
 mise run check-rust-dll
-mise run compare
-BENCH_BUDGET=1000 BENCH_REPEAT=1 BENCH_CASE=pack-miss BENCH_MIN_RATIO=1.0 mise run bench-compare
+mise run build-harness
+
+rust_artifact="$TARGET_DIR/rust/$DLL"
+rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
+harness="$RUST_DIR/target/$rust_target/release/immolate_dll_harness.exe"
+
+smoke_bench() {
+  bench_case="$1"
+  bench_budget="$2"
+
+  echo "Benchmarking Rust $DLL smoke: $bench_case"
+  wine "$harness" bench \
+    --dll "$(winepath -w "$(readlink -f "$rust_artifact")")" \
+    --case "$bench_case" \
+    --budget "$bench_budget" \
+    --threads "${BENCH_THREADS:-0}" \
+    --repeat 1 \
+    --warmup "${BENCH_WARMUP:-1}" \
+    --cuda both \
+    --format "${BENCH_FORMAT:-pretty}" \
+    --color "${BENCH_COLOR:-auto}"
+}
+
+smoke_bench tag-hit 1000
+smoke_bench ux-tag-soul-pack 20000
 '''
 
 [tasks.check]
-description = "Run Lua/C++/Rust lint plus the Rust DLL validation gate"
+description = "Run Lua/Rust lint plus the Rust DLL validation gate"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -404,7 +449,7 @@ mise run check-rust
 '''
 
 [tasks.format]
-description = "Format Lua, C++, and Rust where tools are available"
+description = "Format Lua and Rust where tools are available"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -412,12 +457,6 @@ if command -v stylua >/dev/null; then
   stylua Brainstorm.lua UI.lua config.lua steamodded_compat.lua
 else
   echo "stylua not found"
-fi
-
-if command -v clang-format >/dev/null; then
-  clang-format -i "$CPP_DIR"/*.cpp "$CPP_DIR"/*.hpp
-else
-  echo "clang-format not found"
 fi
 
 cargo fmt --manifest-path "$RUST_DIR/Cargo.toml"
@@ -428,7 +467,7 @@ description = "Alias for format"
 run = "mise run format"
 
 [tasks.lint]
-description = "Check Lua, C++, and Rust formatting/lints"
+description = "Check Lua and Rust formatting/lints"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -438,14 +477,12 @@ lua_files=(Brainstorm.lua UI.lua config.lua steamodded_compat.lua nativefs.lua)
 command -v stylua >/dev/null || { echo "stylua not found. Run: mise install"; exit 1; }
 command -v luajit >/dev/null || { echo "luajit not found. Install LuaJIT, then run: mise run doctor"; exit 1; }
 command -v luacheck >/dev/null || { echo "luacheck not found. Run: mise run setup-lua"; exit 1; }
-command -v clang-format >/dev/null || { echo "clang-format not found. Install clang-format, then run: mise run doctor"; exit 1; }
 
 stylua --check Brainstorm.lua UI.lua config.lua steamodded_compat.lua
 for lua_file in "${lua_files[@]}"; do
   luajit -b "$lua_file" "/tmp/brainstorm-${lua_file//\//-}.luajit"
 done
 luacheck Brainstorm.lua UI.lua config.lua steamodded_compat.lua
-clang-format --dry-run -Werror "$CPP_DIR"/*.cpp "$CPP_DIR"/*.hpp
 
 cargo fmt --manifest-path "$RUST_DIR/Cargo.toml" --check
 cargo clippy --manifest-path "$RUST_DIR/Cargo.toml" --all-targets -- -D warnings
@@ -488,4 +525,4 @@ cp "$DLL" "$target/$DLL"
 
 [tasks.clean]
 description = "Remove build and release artifacts"
-run = "rm -rf Immolate/build Immolate.dll release target/cpp target/rust"
+run = "rm -rf Immolate/build Immolate.dll release target/rust"
