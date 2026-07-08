@@ -1,0 +1,28 @@
+# clippy.toml - Valid configuration fields only
+
+# Set the maximum cognitive complexity allowed
+cognitive-complexity-threshold = 30
+
+# Disallow certain types (optional, comment out if too strict)
+# disallowed-types = [
+#     "std::collections::HashMap",
+#     "std::collections::HashSet",
+# ]
+
+# Warn on large enum variants
+enum-variant-size-threshold = 200
+
+# Set the maximum nesting level for blocks
+excessive-nesting-threshold = 5
+
+# Maximum allowed bool parameters in functions
+max-fn-params-bools = 3
+
+# Single char binding names threshold
+single-char-binding-names-threshold = 5
+
+# Set the maximum number of arguments for functions
+too-many-arguments-threshold = 7
+
+# Set the maximum number of lines for functions
+too-many-lines-threshold = 100
