@@ -110,10 +110,37 @@ Immolate. Keep agent work source-faithful, scoped, and validated.
   real duplication or clarify source-parity rules.
 - Preserve user changes in a dirty worktree. Never reset/revert unrelated work.
 
-## Release Notes
+## Release Invariants
 
-- `.github/workflows/release.yml` creates an immutable production release when
-  a matching `v<VERSION>` tag is pushed and marks the newest release as latest.
-- PRs should state intent, validation run, and whether binary artifacts changed
-  (`target/rust/Immolate.dll` or staged release DLLs). Attach UI screenshots for
-  visual changes.
+- Releases are immutable and version-tag driven. Never recreate a movable
+  `latest` tag, force-move a release tag, edit an existing release in place, or
+  upload release assets with `--clobber`. GitHub's **Latest** marker is release
+  metadata, not a Git tag.
+- Ordinary `master` pushes do not publish releases. To release, run
+  `VERSION=x.y mise run bump-version`, commit every resulting metadata change,
+  then create and push the exact matching `vX.Y` tag. The tag must point to the
+  commit containing that version bump.
+- `mise run bump-version` must update every maintained version surface:
+  `lovely.toml`, `steamodded_compat.lua`, `Immolate/Cargo.toml`,
+  `Immolate/Cargo.lock`, and README's current-release line. Mod version `x.y`
+  maps to Cargo version `x.y.0`; `mise run check-version` enforces the mapping.
+- `.github/workflows/release.yml` must reject a tag/version mismatch and an
+  already-published tag. If a published release has a defect, fix it under a
+  new version and tag; do not mutate the old release.
+- Generate `SHA256SUMS.txt` from inside the artifact directory so it records
+  asset basenames, not CI staging paths. Verify the downloaded assets with
+  `sha256sum --check SHA256SUMS.txt` before considering a release complete.
+- Release titles, zip names, payload `VERSION`, and GitHub tags are derived from
+  the checked canonical version. Never hard-code a separate release version in
+  the workflow.
+- Keep attribution concise and unambiguous everywhere it ships:
+  `Full rewrite by KRVH. Originals: Brainstorm by OceanRamen; Immolate by
+  MathIsFun0.` Do not imply that the original authors created this rewrite.
+  Steamodded `MOD_AUTHOR` must continue to credit OceanRamen and KRVH.
+- Before tagging, run `mise run check` and `mise run release`, inspect the
+  packaged metadata, and validate the workflow syntax. After publishing, verify
+  the GitHub Actions run, **Latest** designation, versioned assets, downloaded
+  checksum, and packaged `VERSION` from the remote release.
+- Do not commit release payloads, generated zips, or staged DLLs. PRs should
+  state validation run and whether binary artifacts changed. Attach UI
+  screenshots for visual changes.
