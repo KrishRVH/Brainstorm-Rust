@@ -1,6 +1,6 @@
 # Brainstorm for Balatro
 
-Current release: **v3.3**.
+Current release: **v3.4**.
 
 **Just want to install it?** Open this repository's **Releases** page, select
 the release marked **Latest**, download the Brainstorm zip, and follow the

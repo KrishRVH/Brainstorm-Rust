@@ -655,7 +655,21 @@ function Brainstorm.build_settings_tab()
                   {
                     n = G.UIT.T,
                     config = {
-                      text = "Full rewrite by KRVH. Originals: Brainstorm by OceanRamen; Immolate by MathIsFun0.",
+                      text = "Full rewrite by KRVH.",
+                      scale = 0.28,
+                      colour = G.C.UI.TEXT_LIGHT,
+                    },
+                  },
+                },
+              },
+              {
+                n = G.UIT.R,
+                config = { align = "cm", padding = 0.02 },
+                nodes = {
+                  {
+                    n = G.UIT.T,
+                    config = {
+                      text = "Originals: Brainstorm by OceanRamen; Immolate by MathIsFun0.",
                       scale = 0.28,
                       colour = G.C.UI.TEXT_LIGHT,
                     },
