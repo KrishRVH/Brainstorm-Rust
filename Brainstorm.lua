@@ -478,7 +478,8 @@ local function show_auto_reroll_text()
   end
   Brainstorm.ar_text = Brainstorm.attention_text({
     scale = 1.4,
-    text = { { ref_table = Brainstorm, ref_value = "ar_status_text" } },
+    ref_table = Brainstorm,
+    ref_value = "ar_status_text",
     align = "cm",
     offset = { x = 0, y = -3.5 },
     major = major,
@@ -1082,21 +1083,15 @@ function Brainstorm.attention_text(args)
           },
           nodes = {
             {
-              n = G.UIT.O,
+              n = G.UIT.T,
               config = {
                 draw_layer = 1,
-                object = DynaText({
-                  scale = args.scale,
-                  string = args.text,
-                  maxw = args.maxw,
-                  colours = { args.colour },
-                  float = true,
-                  shadow = true,
-                  silent = not args.noisy,
-                  pop_in = 0,
-                  pop_in_rate = 6,
-                  rotate = args.rotate or nil,
-                }),
+                text = args.text,
+                ref_table = args.ref_table,
+                ref_value = args.ref_value,
+                scale = args.scale,
+                colour = args.colour,
+                shadow = true,
               },
             },
           },
@@ -1105,8 +1100,7 @@ function Brainstorm.attention_text(args)
       })
       args.AT.attention_text = true
 
-      args.text = args.AT.UIRoot.children[1].config.object
-      args.text:pulse(0.5)
+      args.text = args.AT.UIRoot.children[1]
 
       if args.cover then
         Particles(args.pos.x, args.pos.y, 0, 0, {
