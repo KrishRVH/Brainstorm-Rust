@@ -561,7 +561,11 @@ mod windows_harness {
         if settings.output.format == OutputFormat::Tsv {
             print_tsv_header();
         } else {
-            print_run_header("Brainstorm DLL Benchmark", settings, cases.len());
+            print_run_header(
+                "Brainstorm Supercharged DLL Benchmark",
+                settings,
+                cases.len(),
+            );
         }
 
         let mut summaries = Vec::with_capacity(cases.len());
@@ -605,7 +609,7 @@ mod windows_harness {
             print_tsv_header();
         } else {
             print_run_header(
-                "Brainstorm DLL Benchmark: Rust vs Original",
+                "Brainstorm Supercharged DLL Benchmark: Rust vs Original",
                 settings,
                 cases.len(),
             );

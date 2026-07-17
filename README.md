@@ -1,16 +1,17 @@
-# Brainstorm for Balatro
+# Brainstorm Supercharged for Balatro
 
 Current release: **v3.4**.
 
 **Just want to install it?** Open this repository's **Releases** page, select
-the release marked **Latest**, download the Brainstorm zip, and follow the
-installation guide written in that release.
+the release marked **Latest**, download the Brainstorm Supercharged zip, and
+follow the installation guide written in that release.
 
-<img width="1829" height="1662" alt="Brainstorm settings interface" src="https://github.com/user-attachments/assets/185f0fab-16f0-431e-9573-97138cac9c28" />
+<img width="1829" height="1662" alt="Brainstorm Supercharged settings interface"
+src="https://github.com/user-attachments/assets/185f0fab-16f0-431e-9573-97138cac9c28" />
 
-Brainstorm is a Balatro mod that rapidly searches for seeds matching
-voucher/pack/tag/Joker/Erratic Deck filters and integrates directly into the
-game loop through Lua plus a native Rust DLL.
+Brainstorm Supercharged is a Balatro mod that rapidly searches for seeds
+matching voucher/pack/tag/Joker/Erratic Deck filters and integrates directly
+into the game loop through Lua plus a native Rust DLL.
 
 This repository is a full rewrite by KRVH, based on the original Brainstorm by
 OceanRamen and the original Immolate by MathIsFun0. It adds the Rust native
@@ -137,7 +138,8 @@ VERSION=<VERSION> mise run bump-version
 ```
 
 `mise run release` runs validation, builds `target/rust/Immolate.dll`, stages a
-`Brainstorm/` install folder, and creates `release/Brainstorm_v<VERSION>.zip`.
+`Brainstorm/` install folder, and creates
+`release/Brainstorm_Supercharged_v<VERSION>.zip`.
 
 Commit the synchronized version bump, create the matching `v<VERSION>` tag,
 and push both. `.github/workflows/release.yml` validates that the tag and all
@@ -191,9 +193,10 @@ folder are migrated into that save-directory config.
   impossible native filter combinations return no match immediately.
 - Configure Erratic Deck filters when searching for opening hands by face-card
   count, no faces, or suit concentration.
-- Use "Enable Brainstorm" to disable runtime actions without losing settings.
-- Use "Reset All" in the Brainstorm tab to restore filter and Erratic deck
-  settings to defaults.
+- Use "Enable Brainstorm Supercharged" to disable runtime actions without
+  losing settings.
+- Use "Reset All" in the Brainstorm Supercharged tab to restore filter and
+  Erratic deck settings to defaults.
 
 ## Troubleshooting
 

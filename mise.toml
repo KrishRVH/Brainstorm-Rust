@@ -4,7 +4,7 @@ DLL = "Immolate.dll"
 TARGET_DIR = "target"
 
 [tasks.default]
-description = "List available Brainstorm tasks"
+description = "List available Brainstorm Supercharged tasks"
 run = "mise tasks ls"
 
 [tasks.setup]
@@ -461,7 +461,7 @@ mise run lint-rust
 '''
 
 [tasks.stage-payload]
-description = "Stage the Brainstorm install payload under target/package/Brainstorm"
+description = "Stage the Brainstorm Supercharged install payload under target/package/Brainstorm"
 shell = "bash -c"
 run = '''
 set -euo pipefail
@@ -497,7 +497,7 @@ mise run stage-payload
 
 version_number="$(sed -n 's/^version = "\([^"]*\)"/\1/p' lovely.toml | head -n1)"
 package_dir="Brainstorm"
-package_zip="Brainstorm_v$version_number.zip"
+package_zip="Brainstorm_Supercharged_v$version_number.zip"
 stage_dir="$TARGET_DIR/package/$package_dir"
 release_dir="release/$package_dir"
 

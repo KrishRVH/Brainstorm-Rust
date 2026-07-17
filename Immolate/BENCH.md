@@ -26,7 +26,7 @@ updates, or Balatro frame scheduling. For true Lua wall time, profile
 
 ## Canonical Commands
 
-Build the Rust DLL used by Brainstorm:
+Build the Rust DLL used by Brainstorm Supercharged:
 
 ```bash
 mise run build-rust
@@ -116,9 +116,9 @@ you want a diagnostic report without a speed gate.
 
 `BENCH_FAIL_ON_MISMATCH=0` keeps Rust/original result differences report-only,
 which is the default because the Original DLL is a historical performance
-baseline and its ABI/semantics do not cover every current Brainstorm behavior.
-Set `BENCH_FAIL_ON_MISMATCH=1` only when intentionally auditing a fixture that
-should still match the legacy DLL.
+baseline and its ABI/semantics do not cover every current Brainstorm
+Supercharged behavior. Set `BENCH_FAIL_ON_MISMATCH=1` only when intentionally
+auditing a fixture that should still match the legacy DLL.
 
 ## Pretty Report
 

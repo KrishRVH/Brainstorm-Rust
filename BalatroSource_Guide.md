@@ -836,9 +836,9 @@ Primary sources: all files listed above.
 
 ## Native Model Boundaries
 
-- The Rust native search is the implementation for Brainstorm's shipped DLL
-  behavior. `BalatroSource/` is the source of truth for game mechanics, but some
-  native simplifications are intentional or historical.
+- The Rust native search is the implementation for Brainstorm Supercharged's
+  shipped DLL behavior. `BalatroSource/` is the source of truth for game
+  mechanics, but some native simplifications are intentional or historical.
 - Existing native search operates at family level for booster packs, ignores
   exact concrete booster variants, scans two shop Joker slots even when source
   shop size could be larger, and treats `observatory` as a Telescope plus Mega

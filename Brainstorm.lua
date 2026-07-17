@@ -1,4 +1,4 @@
--- Brainstorm Mod for Balatro
+-- Brainstorm Supercharged Mod for Balatro
 -- High-performance seed filtering and save state management
 -- Full rewrite by KRVH. Originals: Brainstorm by OceanRamen; Immolate by MathIsFun0.
 -- License: CC BY-NC-SA 4.0
@@ -11,7 +11,7 @@ local ffi = require("ffi")
 _G.Brainstorm = _G.Brainstorm or {}
 Brainstorm = _G.Brainstorm
 
-Brainstorm.VERSION = Brainstorm.VERSION or "Brainstorm"
+Brainstorm.VERSION = Brainstorm.VERSION or "Brainstorm Supercharged"
 
 -- Steamodded compatibility reserves Brainstorm.SMODS for reload-time state.
 
@@ -171,7 +171,7 @@ local function load_version_info()
 
   local version = lovely_content:match('version%s*=%s*"([^"]+)"')
   if version then
-    Brainstorm.VERSION = "Brainstorm v" .. version
+    Brainstorm.VERSION = "Brainstorm Supercharged v" .. version
   end
 end
 

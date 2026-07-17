@@ -1,7 +1,6 @@
-# Brainstorm Notices
+# Brainstorm Supercharged Notices
 
-This repository is a full rewrite by KRVH. The original Brainstorm was created
-by OceanRamen, and the original Immolate native search engine was created by
+Full rewrite by KRVH. Originals: Brainstorm by OceanRamen; Immolate by
 MathIsFun0.
 
 The original Brainstorm project is available at:

@@ -49,7 +49,7 @@ jobs:
           {
             echo "RELEASE_VERSION=$version"
             echo "RELEASE_TITLE=Brainstorm Supercharged v$version"
-            echo "PACKAGE_ZIP=Brainstorm_v$version.zip"
+            echo "PACKAGE_ZIP=Brainstorm_Supercharged_v$version.zip"
           } >> "$GITHUB_ENV"
 
       - name: Set up Rust

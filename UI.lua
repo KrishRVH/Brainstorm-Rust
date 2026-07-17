@@ -1,4 +1,4 @@
--- Brainstorm UI Module
+-- Brainstorm Supercharged UI Module
 -- Full rewrite by KRVH. Originals: Brainstorm by OceanRamen; Immolate by MathIsFun0.
 
 local ipairs = ipairs
@@ -346,7 +346,8 @@ local function refresh_brainstorm_tab()
   if not (G and G.OVERLAY_MENU) then
     return
   end
-  local tab_button = G.OVERLAY_MENU:get_UIE_by_ID("tab_but_Brainstorm")
+  local tab_button =
+    G.OVERLAY_MENU:get_UIE_by_ID("tab_but_Brainstorm Supercharged")
   if tab_button then
     G.FUNCS.change_tab(tab_button)
   end
@@ -417,7 +418,7 @@ end
 
 function Brainstorm.build_settings_tab()
   return {
-    label = "Brainstorm",
+    label = "Brainstorm Supercharged",
     tab_definition_function = function()
       rebuild_joker_options()
       if clear_invalid_joker_selection() then
@@ -578,7 +579,7 @@ function Brainstorm.build_settings_tab()
             },
             nodes = {
               create_toggle({
-                label = "Enable Brainstorm",
+                label = "Enable Brainstorm Supercharged",
                 scale = 0.8,
                 ref_table = config,
                 ref_value = "enable",
@@ -681,7 +682,7 @@ function Brainstorm.build_settings_tab()
         },
       }
     end,
-    tab_definition_function_args = "Brainstorm",
+    tab_definition_function_args = "Brainstorm Supercharged",
   }
 end
 
@@ -689,7 +690,7 @@ Brainstorm._ui_hooks = Brainstorm._ui_hooks or {}
 
 local function has_brainstorm_tab(tabs)
   for _, tab in ipairs(tabs) do
-    if tab and tab.label == "Brainstorm" then
+    if tab and tab.label == "Brainstorm Supercharged" then
       return true
     end
   end

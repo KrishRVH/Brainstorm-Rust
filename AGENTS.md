@@ -1,7 +1,7 @@
 # Repository Guidelines
 
-Brainstorm is a Balatro mod with Lua UI/hooks and a native Rust DLL named
-Immolate. Keep agent work source-faithful, scoped, and validated.
+Brainstorm Supercharged is a Balatro mod with Lua UI/hooks and a native Rust
+DLL named Immolate. Keep agent work source-faithful, scoped, and validated.
 
 ## Non-Negotiables
 
