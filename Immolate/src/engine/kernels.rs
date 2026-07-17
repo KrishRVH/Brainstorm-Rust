@@ -398,6 +398,19 @@ fn composite(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
         }
     }
 
+    // Three normal Arcana Soul rolls are cheaper than a shop-Joker miss.
+    if !souls_checked_early
+        && cfg.raw.pack == Item::Arcana_Pack
+        && cfg.raw.souls == 1
+        && !cfg.raw.perkeo
+        && cfg.wants_joker_shop
+    {
+        if !composite_has_souls_and_perkeo(state, cfg, packs) {
+            return false;
+        }
+        souls_checked_early = true;
+    }
+
     if cfg.raw.joker != Item::RETRY && !composite_has_joker(state, cfg, packs) {
         return false;
     }
