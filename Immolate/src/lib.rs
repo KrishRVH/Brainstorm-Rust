@@ -1235,6 +1235,31 @@ mod tests {
     }
 
     #[test]
+    fn jumbo_arcana_soul_joker_preserves_source_earliest_result() {
+        use crate::engine::config::KernelShape;
+
+        let cfg = filter_config_from_benchmark(&benchmark_case("ux-jumbo-arcana-soul-joker"));
+        assert_eq!(CompiledFilter::compile(&cfg).shape, KernelShape::Composite);
+
+        let budget = 52_862;
+        let expected = source_oracle_search("", &cfg, budget);
+        assert_eq!(expected.as_deref(), Some("X721111"));
+
+        for threads in [0, 1, 2, 4, 8, 16, i32::MAX] {
+            assert_eq!(
+                brainstorm_search_core("", &cfg, budget - 1, threads),
+                None,
+                "Jumbo Arcana Soul/Joker search crossed its budget with {threads} threads",
+            );
+            assert_eq!(
+                brainstorm_search_core("", &cfg, budget, threads),
+                expected,
+                "Jumbo Arcana Soul/Joker search changed its earliest result with {threads} threads",
+            );
+        }
+    }
+
+    #[test]
     fn voucher_with_unselected_soul_pack_preserves_source_earliest_results() {
         use crate::engine::config::KernelShape;
 
