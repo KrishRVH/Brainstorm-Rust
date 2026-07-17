@@ -555,6 +555,7 @@ function Brainstorm.build_settings_tab()
                 label = "AR: JOKER SEARCH",
                 scale = 0.8,
                 w = 4,
+                no_pips = true,
                 options = joker_keys,
                 opt_callback = "change_search_joker",
                 current_option = joker_option,
