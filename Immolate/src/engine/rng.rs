@@ -220,7 +220,7 @@ impl ErraticDraws<'_> {
     #[inline]
     fn next_mantissa(&mut self) -> u64 {
         let node = advance_node(self.node, self.hashed_seed);
-        LuaRandom::new(node).randdblmem() & ERRATIC_MANTISSA_MASK
+        LuaRandom::new(node).randint_raw() & ERRATIC_MANTISSA_MASK
     }
 }
 

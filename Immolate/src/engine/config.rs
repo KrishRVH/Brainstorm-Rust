@@ -70,7 +70,7 @@ impl CompiledFilter {
 
     pub const fn chunk_size(&self) -> i64 {
         match self.shape {
-            KernelShape::Erratic => 1_024,
+            KernelShape::Erratic => 512,
             KernelShape::Composite
             | KernelShape::SpectralSoulPerkeo
             | KernelShape::VoucherSecondPack => 2_048,
@@ -85,7 +85,8 @@ impl CompiledFilter {
 
     pub const fn serial_prefix_size(&self) -> i64 {
         match self.shape {
-            KernelShape::Erratic | KernelShape::SpectralSoulPerkeo => 1_024,
+            KernelShape::Erratic => 256,
+            KernelShape::SpectralSoulPerkeo => 1_024,
             KernelShape::PackJoker | KernelShape::Souls | KernelShape::TagObservatory => 8_192,
             _ => 4_096,
         }
