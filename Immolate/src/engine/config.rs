@@ -72,7 +72,8 @@ impl CompiledFilter {
         match self.shape {
             KernelShape::Erratic => 512,
             KernelShape::Composite => 512,
-            KernelShape::SpectralSoulPerkeo => 2_048,
+            // Soul+Perkeo work is heavy enough for finer participation and cancellation.
+            KernelShape::SpectralSoulPerkeo => 1_024,
             // Nearby voucher/second-pack hits benefit from tighter cancellation granularity.
             KernelShape::VoucherSecondPack => 1_024,
             KernelShape::ShopJoker
