@@ -307,15 +307,14 @@ fn erratic_faces_only(state: &mut SearchState, required_faces: i32) -> bool {
     let mut misses_left = 52 - required_faces;
     let mut draws = state.rng.erratic_draws(&mut state.seed, state.hashed_seed);
     for _ in 0..52 {
-        if draws.next_is_face() {
-            faces_needed -= 1;
-            if faces_needed == 0 {
-                return true;
-            }
-        } else if misses_left == 0 {
+        let is_face = i32::from(draws.next_is_face());
+        faces_needed -= is_face;
+        misses_left -= 1 - is_face;
+        if faces_needed == 0 {
+            return true;
+        }
+        if misses_left < 0 {
             return false;
-        } else {
-            misses_left -= 1;
         }
     }
     false
