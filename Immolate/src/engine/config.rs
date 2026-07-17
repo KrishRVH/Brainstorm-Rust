@@ -78,8 +78,9 @@ impl CompiledFilter {
             KernelShape::VoucherSecondPack => 1_024,
             // Long-tail dual-tag Observatory searches need fine cancellation granularity.
             KernelShape::TagObservatory => 1_024,
+            // Long-tail pack Joker hits benefit from finer worker participation and cancellation.
+            KernelShape::PackJoker => 1_024,
             KernelShape::ShopJoker
-            | KernelShape::PackJoker
             | KernelShape::AnyJoker
             | KernelShape::Souls
             | KernelShape::Perkeo => 4_096,
