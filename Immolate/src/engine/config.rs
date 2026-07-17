@@ -76,6 +76,8 @@ impl CompiledFilter {
             KernelShape::SpectralSoulPerkeo => 1_024,
             // Nearby voucher/second-pack hits benefit from tighter cancellation granularity.
             KernelShape::VoucherSecondPack => 1_024,
+            // Long-tail dual-tag Observatory searches need fine cancellation granularity.
+            KernelShape::TagObservatory => 1_024,
             KernelShape::ShopJoker
             | KernelShape::PackJoker
             | KernelShape::AnyJoker
@@ -109,6 +111,8 @@ impl CompiledFilter {
             | KernelShape::Perkeo => 16,
             // Voucher + rolled second-pack searches find nearby hits where more workers cost extra.
             KernelShape::VoucherSecondPack => 8,
+            // Dual-tag Observatory checks have enough work to use the full complex-shape cap.
+            KernelShape::TagObservatory => 16,
             _ => 4,
         }
     }
