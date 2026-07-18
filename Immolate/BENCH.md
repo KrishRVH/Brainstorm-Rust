@@ -10,8 +10,9 @@ Correctness and speed are separate questions. `mise run check-rust` validates
 the Rust implementation through unit tests, DLL export/import checks, and small
 benchmark smoke tests. `mise run bench-compare` reports performance against the
 historical DLL and reports comparable result mismatches. It skips fixtures the
-older ABI cannot represent, and it normalizes Original DLL hits that land beyond
-the selected `BENCH_BUDGET` to `<null>` before comparison.
+older ABI cannot represent. For measured legacy hits, it preserves the raw
+result and computes scanned work using the Original DLL's length-major
+lexicographic seed order, which differs from the current Rust search order.
 
 Use `BENCH_THREADS=0` for user-facing comparisons and UX reports. That is the
 Lua auto-reroll call path, so it measures what players actually experience.
@@ -111,14 +112,20 @@ looking for meaningful regressions. `BENCH_WARMUP` controls discarded warmup
 calls before the measured samples.
 
 `BENCH_MIN_RATIO=1.0` makes the harness fail if any comparable user-facing
-Rust/original speedup drops below parity. Set `BENCH_MIN_RATIO=0.0` only when
-you want a diagnostic report without a speed gate.
+Rust/original speedup drops below parity. Only the explicit `baseline-hit`
+fixture is strict-comparable: both implementations return the same non-empty
+starting seed after exactly one candidate. Other measured ratios are marked
+informational and never enter the threshold because the two DLLs traverse seeds
+in different orders. Set `BENCH_MIN_RATIO=0.0` only when you want a diagnostic
+report without a speed gate.
 
 `BENCH_FAIL_ON_MISMATCH=0` keeps Rust/original result differences report-only,
 which is the default because the Original DLL is a historical performance
 baseline and its ABI/semantics do not cover every current Brainstorm
 Supercharged behavior. Set `BENCH_FAIL_ON_MISMATCH=1` only when intentionally
-auditing a fixture that should still match the legacy DLL.
+auditing a fixture that should still match the legacy DLL. An empty legacy
+result can mean either a hit on the empty seed or a fixed-cap miss, so only a
+non-empty current seed proves a mismatch against it.
 
 ## Pretty Report
 
@@ -179,10 +186,11 @@ compare ...
 skip    ...
 ```
 
-For `compare` rows, the `impl` column carries the row status (`ok` or
-`below-target`). The relation is stored in the `result` field as
-semicolon-delimited details such as `ratio`, `target_ratio`, `lhs`, `rhs`,
-`lhs_sps`, `rhs_sps`, `lhs_ms`, `rhs_ms`, `lhs_result`, and `rhs_result`.
+For `compare` rows, the `impl` column carries the row status (`ok`,
+`below-target`, or `informational`). The relation is stored in the `result`
+field as semicolon-delimited details such as `ratio`, `target_ratio`, `strict`,
+`lhs`, `rhs`, `lhs_sps`, `rhs_sps`, `lhs_ms`, `rhs_ms`, `lhs_result`, and
+`rhs_result`.
 
 ## Original Brainstorm Baseline
 
@@ -195,9 +203,18 @@ calling it.
 Because that ABI has no budget, thread, second-tag, joker, or deck-filter
 parameters, the harness skips Original DLL measurements for unsupported
 fixtures and for miss fixtures that would otherwise run to the original fixed
-100M seed cap. For measured fixtures, Original DLL hits beyond the selected
-benchmark budget are treated as `<null>` so the comparison uses the same
-effective search window as the Rust DLL.
+100M seed cap. It also skips an empty legacy result because the old ABI uses the
+same empty string for a successful empty seed and for no hit, so the work is
+ambiguous. Each measured current/legacy case gets one untimed probe before its
+configured warmups, and every measured repeat must return exactly the probe's
+raw seed and scan count.
+
+Most historical timings are intentionally informational: the implementations
+can use different seed orders and model different mechanics even when the old
+ABI accepts the same inputs. Strict parity applies only to the proven non-empty,
+one-candidate `baseline-hit` fixture. Use the frozen current-build versus
+candidate benchmark for performance regression decisions across current
+semantics.
 
 ## Optional Native Rust-Only Benchmark
 

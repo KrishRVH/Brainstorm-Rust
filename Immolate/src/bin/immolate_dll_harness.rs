@@ -6,6 +6,167 @@ fn main() {
     std::process::exit(2);
 }
 
+#[cfg(any(windows, test))]
+const LEGACY_SEED_SPACE: i64 = 2_318_107_019_761;
+
+#[cfg(any(windows, test))]
+#[derive(Debug, Eq, PartialEq)]
+enum LegacyProbe {
+    EmptyResult,
+    Hit { scanned: i64 },
+}
+
+#[cfg(any(windows, test))]
+fn legacy_seed_id(seed: &str) -> Result<i64, String> {
+    if seed.len() > 8 {
+        return Err(format!("legacy seed is longer than eight bytes: {seed:?}"));
+    }
+    if seed.is_empty() {
+        return Ok(0);
+    }
+
+    let mut shorter_lengths = 0_i64;
+    let mut length_size = 35_i64;
+    for _ in 1..seed.len() {
+        shorter_lengths += length_size;
+        length_size *= 35;
+    }
+
+    let mut within_length = 0_i64;
+    for byte in seed.bytes() {
+        let digit = match byte {
+            b'1'..=b'9' => i64::from(byte - b'1'),
+            b'A'..=b'Z' => i64::from(byte - b'A' + 9),
+            _ => return Err(format!("legacy seed contains an invalid byte: {seed:?}")),
+        };
+        within_length = within_length * 35 + digit;
+    }
+    Ok(shorter_lengths + within_length + 1)
+}
+
+#[cfg(any(windows, test))]
+fn legacy_seed_scan_count(start: &str, result: &str) -> Result<i64, String> {
+    let start = legacy_seed_id(start)?;
+    let result = legacy_seed_id(result)?;
+    Ok((result - start).rem_euclid(LEGACY_SEED_SPACE) + 1)
+}
+
+#[cfg(any(windows, test))]
+fn classify_legacy_probe(start: &str, result: Option<&str>) -> Result<LegacyProbe, String> {
+    let Some(result) = result else {
+        return Err("legacy DLL returned a null pointer".to_owned());
+    };
+    if result.is_empty() {
+        return Ok(LegacyProbe::EmptyResult);
+    }
+    let scanned = legacy_seed_scan_count(start, result)?;
+    Ok(LegacyProbe::Hit { scanned })
+}
+
+#[cfg(any(windows, test))]
+fn is_strict_legacy_comparison(
+    case_name: &str,
+    rust_result: &str,
+    rust_scanned: i64,
+    legacy_result: &str,
+    legacy_scanned: i64,
+) -> bool {
+    case_name == "baseline-hit"
+        && !rust_result.is_empty()
+        && rust_result != "<null>"
+        && legacy_result != "<null>"
+        && rust_result == legacy_result
+        && rust_scanned == 1
+        && legacy_scanned == 1
+}
+
+#[cfg(any(windows, test))]
+fn legacy_empty_proves_mismatch(rust_result: &str) -> bool {
+    !matches!(rust_result, "" | "<null>")
+}
+
+#[cfg(any(windows, test))]
+fn requires_strict_legacy_fixture(selected_case: &str) -> bool {
+    matches!(selected_case, "all" | "baseline" | "baseline-hit")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        LEGACY_SEED_SPACE, LegacyProbe, classify_legacy_probe, is_strict_legacy_comparison,
+        legacy_empty_proves_mismatch, legacy_seed_id, legacy_seed_scan_count,
+        requires_strict_legacy_fixture,
+    };
+
+    #[test]
+    fn legacy_seed_ids_follow_length_major_lexicographic_order() {
+        assert_eq!(legacy_seed_id(""), Ok(0));
+        assert_eq!(legacy_seed_id("1"), Ok(1));
+        assert_eq!(legacy_seed_id("A"), Ok(10));
+        assert_eq!(legacy_seed_id("Z"), Ok(35));
+        assert_eq!(legacy_seed_id("11"), Ok(36));
+        assert_eq!(legacy_seed_id("1D"), Ok(48));
+        assert_eq!(legacy_seed_id("IA"), Ok(640));
+        assert_eq!(legacy_seed_id("ZZZZZZZZ"), Ok(LEGACY_SEED_SPACE - 1));
+        assert!(legacy_seed_id("0").is_err());
+        assert!(legacy_seed_id("111111111").is_err());
+    }
+
+    #[test]
+    fn legacy_probe_classifies_hits_and_ambiguous_empty_results() {
+        assert_eq!(legacy_seed_scan_count("A", "A"), Ok(1));
+        assert_eq!(legacy_seed_scan_count("", "A"), Ok(11));
+        assert_eq!(legacy_seed_scan_count("ZZZZZZZZ", "1"), Ok(3));
+        assert_eq!(
+            classify_legacy_probe("", Some("A")),
+            Ok(LegacyProbe::Hit { scanned: 11 })
+        );
+        assert_eq!(
+            classify_legacy_probe("", Some("")),
+            Ok(LegacyProbe::EmptyResult)
+        );
+        assert!(classify_legacy_probe("", None).is_err());
+    }
+
+    #[test]
+    fn strict_legacy_comparison_is_the_proven_nonempty_one_candidate_fixture() {
+        assert!(is_strict_legacy_comparison("baseline-hit", "1", 1, "1", 1,));
+        assert!(!is_strict_legacy_comparison("other", "1", 1, "1", 1));
+        assert!(!is_strict_legacy_comparison(
+            "baseline-hit",
+            "A",
+            11,
+            "A",
+            11,
+        ));
+        assert!(!is_strict_legacy_comparison("baseline-hit", "", 1, "", 1,));
+        assert!(!is_strict_legacy_comparison(
+            "baseline-hit",
+            "<null>",
+            1,
+            "<null>",
+            1,
+        ));
+        assert!(!is_strict_legacy_comparison("baseline-hit", "B", 1, "A", 1,));
+    }
+
+    #[test]
+    fn ambiguous_legacy_empty_only_disproves_a_nonempty_current_seed() {
+        assert!(!legacy_empty_proves_mismatch(""));
+        assert!(!legacy_empty_proves_mismatch("<null>"));
+        assert!(legacy_empty_proves_mismatch("1"));
+    }
+
+    #[test]
+    fn full_and_baseline_selections_require_the_strict_fixture() {
+        assert!(requires_strict_legacy_fixture("all"));
+        assert!(requires_strict_legacy_fixture("baseline"));
+        assert!(requires_strict_legacy_fixture("baseline-hit"));
+        assert!(!requires_strict_legacy_fixture("ux"));
+        assert!(!requires_strict_legacy_fixture("ux-soul-no-pack"));
+    }
+}
+
 #[cfg(windows)]
 fn main() {
     windows_harness::main();
@@ -31,6 +192,10 @@ mod windows_harness {
     use immolate::seed::{SEED_SPACE, Seed};
 
     use super::bench_cases::{self as bench, BenchCase, BenchGroup, BenchShape};
+    use super::{
+        LegacyProbe, classify_legacy_probe, is_strict_legacy_comparison,
+        legacy_empty_proves_mismatch, legacy_seed_scan_count, requires_strict_legacy_fixture,
+    };
 
     type HModule = *mut c_void;
     type FarProc = *mut c_void;
@@ -136,6 +301,12 @@ mod windows_harness {
         Original(OriginalBrainstorm),
     }
 
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum MeasurementKind {
+        Current,
+        Legacy,
+    }
+
     impl Dll {
         fn load(path: &str) -> Result<Self, String> {
             Self::load_current(path)
@@ -175,6 +346,13 @@ mod windows_harness {
             match self.entry {
                 DllEntry::Current(search) => self.run_current(case, search),
                 DllEntry::Original(search) => self.run_original(case, search),
+            }
+        }
+
+        fn measurement_kind(&self) -> MeasurementKind {
+            match &self.entry {
+                DllEntry::Current(_) => MeasurementKind::Current,
+                DllEntry::Original(_) => MeasurementKind::Legacy,
             }
         }
 
@@ -618,6 +796,10 @@ mod windows_harness {
         let mut failed = false;
         let mut comparisons = Vec::with_capacity(cases.len());
         for case in &cases {
+            let rust_probe = rust.run(case)?;
+            let rust_probe_scanned =
+                measured_scanned_count(rust.measurement_kind(), case, rust_probe.as_deref())?;
+            let rust_probe_result = display_result(rust_probe.as_deref()).to_owned();
             let rust_summary = measure_bench_case(
                 &rust,
                 case,
@@ -626,19 +808,56 @@ mod windows_harness {
                 "rust",
                 settings.output,
             )?;
-            let (original_summary, original_skip) = match original_skip_reason(case) {
-                Some(reason) => (None, Some(reason)),
-                None => (
-                    Some(measure_bench_case(
-                        &original,
-                        case,
-                        settings.repeat,
-                        settings.warmup,
-                        "original",
-                        settings.output,
-                    )?),
-                    None,
-                ),
+            if rust_summary.result != rust_probe_result
+                || rust_summary.scanned != rust_probe_scanned
+            {
+                return Err(format!(
+                    "Rust DLL changed result during {}: probe={rust_probe_result}/{rust_probe_scanned}, measured={}/{}",
+                    case.name, rust_summary.result, rust_summary.scanned,
+                ));
+            }
+            let (original_summary, original_skip) = if let Some(reason) = original_skip_reason(case)
+            {
+                (None, Some(reason))
+            } else {
+                let probe_result = original.run(case)?;
+                match classify_legacy_probe(case.seed_start.unwrap_or(""), probe_result.as_deref())?
+                {
+                    LegacyProbe::EmptyResult => {
+                        if fail_on_mismatch && legacy_empty_proves_mismatch(&rust_summary.result) {
+                            failed = true;
+                            eprintln!(
+                                "benchmark parity mismatch in {}: rust={} original=<ambiguous-empty>",
+                                case.name, rust_summary.result,
+                            );
+                        }
+                        (
+                            None,
+                            Some(
+                                "legacy empty result is ambiguous between an initial-seed hit and a fixed-cap miss",
+                            ),
+                        )
+                    },
+                    LegacyProbe::Hit { scanned } => {
+                        let probe_result =
+                            probe_result.expect("non-empty legacy probe has a result");
+                        let summary = measure_bench_case(
+                            &original,
+                            case,
+                            settings.repeat,
+                            settings.warmup,
+                            "original",
+                            settings.output,
+                        )?;
+                        if summary.result != probe_result || summary.scanned != scanned {
+                            return Err(format!(
+                                "legacy DLL changed result during {}: probe={probe_result}/{scanned}, measured={}/{}",
+                                case.name, summary.result, summary.scanned,
+                            ));
+                        }
+                        (Some(summary), None)
+                    },
+                }
             };
             let comparison = BenchComparison {
                 rust: rust_summary,
@@ -647,7 +866,7 @@ mod windows_harness {
             };
             if min_ratio > 0.0
                 && comparison
-                    .rust_vs_original_ratio()
+                    .strict_rust_vs_original_ratio()
                     .is_some_and(|ratio| ratio < min_ratio)
             {
                 failed = true;
@@ -665,6 +884,18 @@ mod windows_harness {
                 print_tsv_compare(&comparison, min_ratio);
             }
             comparisons.push(comparison);
+        }
+        if min_ratio > 0.0
+            && requires_strict_legacy_fixture(settings.selected_case)
+            && !comparisons
+                .iter()
+                .any(BenchComparison::is_strictly_comparable)
+        {
+            failed = true;
+            eprintln!(
+                "benchmark selection {} did not produce its required strict baseline comparison",
+                settings.selected_case,
+            );
         }
         if settings.output.format == OutputFormat::Pretty {
             print_compare_report(&comparisons, min_ratio, settings.output);
@@ -702,7 +933,7 @@ mod windows_harness {
         p99_elapsed: Duration,
         stdev_elapsed: Duration,
         coefficient_variation: f64,
-        mean_scanned: f64,
+        scanned: i64,
         scanned_pct: f64,
         seeds_per_sec: f64,
         ns_per_seed: f64,
@@ -722,6 +953,25 @@ mod windows_harness {
             })
         }
 
+        fn is_strictly_comparable(&self) -> bool {
+            self.original.as_ref().is_some_and(|original| {
+                is_strict_legacy_comparison(
+                    self.rust.case_name,
+                    &self.rust.result,
+                    self.rust.scanned,
+                    &original.result,
+                    original.scanned,
+                )
+            })
+        }
+
+        fn strict_rust_vs_original_ratio(&self) -> Option<f64> {
+            self.is_strictly_comparable().then(|| {
+                self.rust_vs_original_ratio()
+                    .expect("strict comparison has original")
+            })
+        }
+
         fn has_result_mismatch(&self) -> bool {
             self.original
                 .as_ref()
@@ -737,24 +987,21 @@ mod windows_harness {
         implementation: &'static str,
         output: OutputOptions,
     ) -> Result<BenchSummary, String> {
+        let measurement_kind = dll.measurement_kind();
         run_warmups(dll, case, warmup)?;
-        let mut runs = Vec::with_capacity(repeat);
-        let mut scanned_counts = Vec::with_capacity(repeat);
+        let mut runs: Vec<BenchRun> = Vec::with_capacity(repeat);
         for run in 1..=repeat {
             let started = Instant::now();
             let result = dll.run(case);
             let elapsed = started.elapsed();
-            let mut result = result?;
-            if implementation == "original" {
-                result = normalize_legacy_original_result(case, result);
-            }
+            let result = result?;
             if case.compiled_no_match && result.is_some() {
                 return Err(format!(
                     "{} compiled to NoMatch but {implementation} returned a seed",
                     case.name,
                 ));
             }
-            let scanned = scanned_count(case, result.as_deref());
+            let scanned = measured_scanned_count(measurement_kind, case, result.as_deref())?;
             let elapsed_secs = elapsed.as_secs_f64();
             let seeds_per_sec = if scanned > 0 && elapsed_secs > 0.0 {
                 scanned as f64 / elapsed_secs
@@ -766,14 +1013,22 @@ mod windows_harness {
             } else {
                 0.0
             };
-            scanned_counts.push(scanned);
+            let result = display_result(result.as_deref()).to_owned();
+            if let Some(first) = runs.first() {
+                if first.scanned != scanned || first.result != result {
+                    return Err(format!(
+                        "{} changed result during {implementation}: first={}/{}, run {run}={result}/{scanned}",
+                        case.name, first.result, first.scanned,
+                    ));
+                }
+            }
             let bench_run = BenchRun {
                 run,
                 elapsed,
                 scanned,
                 seeds_per_sec,
                 ns_per_seed,
-                result: display_result(result.as_deref()).to_owned(),
+                result,
             };
             if output.format == OutputFormat::Tsv {
                 print_tsv_run(implementation, case, &bench_run);
@@ -794,25 +1049,20 @@ mod windows_harness {
         } else {
             stdev_elapsed.as_secs_f64() / mean_elapsed.as_secs_f64()
         };
-        let mean_scanned = scanned_counts
-            .iter()
-            .map(|value| *value as f64)
-            .sum::<f64>()
-            / repeat as f64;
-        let seeds_per_sec = if mean_scanned > 0.0 && !mean_elapsed.is_zero() {
-            mean_scanned / mean_elapsed.as_secs_f64()
+        let scanned = runs[0].scanned;
+        let scanned_f64 = scanned as f64;
+        let seeds_per_sec = if scanned > 0 && !mean_elapsed.is_zero() {
+            scanned_f64 / mean_elapsed.as_secs_f64()
         } else {
             0.0
         };
-        let ns_per_seed = if mean_scanned > 0.0 {
-            mean_elapsed.as_secs_f64() * 1_000_000_000.0 / mean_scanned
+        let ns_per_seed = if scanned > 0 {
+            mean_elapsed.as_secs_f64() * 1_000_000_000.0 / scanned_f64
         } else {
             0.0
         };
-        let scanned_pct = mean_scanned / case.num_seeds as f64;
-        let result = runs
-            .last()
-            .map_or_else(|| "<none>".to_owned(), |run| run.result.clone());
+        let scanned_pct = scanned_f64 / case.num_seeds as f64;
+        let result = runs[0].result.clone();
         let summary = BenchSummary {
             implementation,
             case_name: case.name,
@@ -830,7 +1080,7 @@ mod windows_harness {
             p99_elapsed,
             stdev_elapsed,
             coefficient_variation,
-            mean_scanned,
+            scanned,
             scanned_pct,
             seeds_per_sec,
             ns_per_seed,
@@ -1036,12 +1286,27 @@ mod windows_harness {
         result.unwrap_or("<null>")
     }
 
-    fn normalize_legacy_original_result(case: &Case, result: Option<String>) -> Option<String> {
-        result.filter(|seed| result_within_budget(case, seed))
-    }
-
-    fn result_within_budget(case: &Case, result: &str) -> bool {
-        result.is_empty() || seed_scan_count(case, result) <= case.num_seeds
+    fn measured_scanned_count(
+        measurement_kind: MeasurementKind,
+        case: &Case,
+        result: Option<&str>,
+    ) -> Result<i64, String> {
+        if measurement_kind == MeasurementKind::Current {
+            return Ok(scanned_count(case, result));
+        }
+        let Some(result) = result else {
+            return Err(format!(
+                "legacy DLL returned a null pointer during {}",
+                case.name
+            ));
+        };
+        if result.is_empty() {
+            return Err(format!(
+                "legacy DLL returned an ambiguous empty result during {}",
+                case.name,
+            ));
+        }
+        legacy_seed_scan_count(case.seed_start.unwrap_or(""), result)
     }
 
     fn scanned_count(case: &Case, result: Option<&str>) -> i64 {
@@ -1305,6 +1570,14 @@ mod windows_harness {
         let color = output.use_color();
         print_section("Rust vs Original Brainstorm", color);
         println!(
+            "{}",
+            paint(
+                color,
+                ANSI_DIM,
+                "~ ratios are informational; BENCH_MIN_RATIO applies only to the proven baseline-hit fixture",
+            )
+        );
+        println!(
             "{:<18} {:<9} {:<6} {:>7} {:>11} {:>11} {:>11} {:>17} {:>17} {:>11}",
             "case",
             "group",
@@ -1323,10 +1596,21 @@ mod windows_harness {
                 let rust_ratio = comparison
                     .rust_vs_original_ratio()
                     .expect("original comparison has ratio");
+                let strict = comparison.is_strictly_comparable();
+                let ratio_text = if strict {
+                    format!("{rust_ratio:.3}x")
+                } else {
+                    format!("~{rust_ratio:.3}x")
+                };
+                let ratio_text = format!("{ratio_text:>11}");
                 let ratio = paint(
                     color,
-                    ratio_color(rust_ratio, min_ratio.max(1.0)),
-                    &format!("{rust_ratio:>10.3}x"),
+                    if strict {
+                        ratio_color(rust_ratio, min_ratio.max(1.0))
+                    } else {
+                        ANSI_DIM
+                    },
+                    &ratio_text,
                 );
                 let cv_pair = format!(
                     "{:.1}/{:.1}%",
@@ -1413,7 +1697,7 @@ mod windows_harness {
     }
 
     fn print_group_report(comparisons: &[BenchComparison], min_ratio: f64, color: bool) {
-        print_section("Group Speedups", color);
+        print_section("Strict Group Speedups", color);
         println!(
             "{:<10} {:>8} {:>12} {:<24} {:<24}",
             "group", "measured", "gmean", "best", "worst",
@@ -1423,7 +1707,7 @@ mod windows_harness {
             let group_comparisons: Vec<_> = comparisons
                 .iter()
                 .filter(|comparison| {
-                    comparison.rust.group == group && comparison.original.is_some()
+                    comparison.rust.group == group && comparison.is_strictly_comparable()
                 })
                 .collect();
             if group_comparisons.is_empty() {
@@ -1474,7 +1758,7 @@ mod windows_harness {
             .iter()
             .filter(|comparison| {
                 comparison
-                    .rust_vs_original_ratio()
+                    .strict_rust_vs_original_ratio()
                     .is_some_and(|ratio| ratio < threshold)
             })
             .collect();
@@ -1546,15 +1830,30 @@ mod windows_harness {
     fn print_original_tsv_compare(comparison: &BenchComparison, min_ratio: f64) {
         let Some(original) = &comparison.original else {
             if let Some(reason) = comparison.original_skip {
-                println!(
-                    "skip\toriginal\t{}\t{}\t{}\t{}\t\t\t{}\t\t\t\t\t\t\t\t\t\t{}",
-                    comparison.rust.case_name,
-                    comparison.rust.group.key(),
-                    comparison.rust.shape.label(),
-                    comparison.rust.budget,
-                    comparison.rust.threads,
-                    reason,
-                );
+                let fields = [
+                    "skip".to_owned(),
+                    "original".to_owned(),
+                    comparison.rust.case_name.to_owned(),
+                    comparison.rust.group.key().to_owned(),
+                    comparison.rust.shape.label().to_owned(),
+                    comparison.rust.budget.to_string(),
+                    String::new(),
+                    String::new(),
+                    comparison.rust.threads.to_string(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    reason.to_owned(),
+                ];
+                println!("{}", fields.join("\t"));
             }
             return;
         };
@@ -1566,6 +1865,7 @@ mod windows_harness {
                 .rust_vs_original_ratio()
                 .expect("original comparison has ratio"),
             min_ratio,
+            comparison.is_strictly_comparable(),
         );
     }
 
@@ -1602,13 +1902,13 @@ mod windows_harness {
 
     fn print_tsv_summary(summary: &BenchSummary) {
         println!(
-            "summary\t{}\t{}\t{}\t{}\t{}\t{:.0}\t{:.6}\t{}\t{}\t{:.3}\t{:.0}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{}",
+            "summary\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{:.3}\t{:.0}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{}",
             summary.implementation,
             summary.case_name,
             summary.group.key(),
             summary.shape.label(),
             summary.budget,
-            summary.mean_scanned,
+            summary.scanned,
             summary.scanned_pct,
             summary.threads,
             summary.repeat,
@@ -1636,20 +1936,23 @@ mod windows_harness {
         rhs: &BenchSummary,
         ratio: f64,
         target_ratio: f64,
+        strict: bool,
     ) {
-        let status = if ratio >= target_ratio {
+        let status = if !strict {
+            "informational"
+        } else if ratio >= target_ratio {
             "ok"
         } else {
             "below-target"
         };
         println!(
-            "compare\t{}\t{}\t{}\t{}\t{}\t{:.0}\t{:.6}\t{}\t{}\t{:.3}\t{:.0}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\tratio={:.3};target_ratio={:.3};lhs={};rhs={};lhs_sps={:.0};rhs_sps={:.0};lhs_ms={:.3};rhs_ms={:.3};lhs_result={};rhs_result={}",
+            "compare\t{}\t{}\t{}\t{}\t{}\t{}\t{:.6}\t{}\t{}\t{:.3}\t{:.0}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\tratio={:.3};target_ratio={:.3};strict={};lhs={};rhs={};lhs_sps={:.0};rhs_sps={:.0};lhs_ms={:.3};rhs_ms={:.3};lhs_result={};rhs_result={}",
             status,
             lhs.case_name,
             lhs.group.key(),
             lhs.shape.label(),
             lhs.budget,
-            lhs.mean_scanned,
+            lhs.scanned,
             lhs.scanned_pct,
             lhs.threads,
             lhs.repeat,
@@ -1665,6 +1968,7 @@ mod windows_harness {
             lhs.coefficient_variation * 100.0,
             ratio,
             target_ratio,
+            strict,
             relation.split("-vs-").next().unwrap_or(relation),
             relation.split("-vs-").nth(1).unwrap_or("unknown"),
             lhs.seeds_per_sec,
