@@ -72,18 +72,13 @@ impl CompiledFilter {
         match self.shape {
             KernelShape::Erratic => 512,
             KernelShape::Composite => 512,
-            // Soul+Perkeo work is heavy enough for finer participation and cancellation.
-            KernelShape::SpectralSoulPerkeo => 1_024,
-            // Nearby voucher/second-pack hits benefit from tighter cancellation granularity.
-            KernelShape::VoucherSecondPack => 1_024,
-            // Long-tail dual-tag Observatory searches need fine cancellation granularity.
-            KernelShape::TagObservatory => 1_024,
-            // Long-tail pack Joker hits benefit from finer worker participation and cancellation.
-            KernelShape::PackJoker => 1_024,
-            // Long-tail any-Joker searches benefit from finer participation and cancellation.
-            KernelShape::AnyJoker => 1_024,
-            // The canonical Normal Arcana Perkeo hit benefits from finer participation and cancellation.
-            KernelShape::Perkeo => 1_024,
+            // Expensive and long-tail workflows benefit from finer participation and cancellation.
+            KernelShape::SpectralSoulPerkeo
+            | KernelShape::VoucherSecondPack
+            | KernelShape::TagObservatory
+            | KernelShape::PackJoker
+            | KernelShape::AnyJoker
+            | KernelShape::Perkeo => 1_024,
             KernelShape::ShopJoker | KernelShape::Souls => 4_096,
             _ => 8_192,
         }
@@ -103,18 +98,17 @@ impl CompiledFilter {
 
     pub const fn auto_thread_limit(&self) -> usize {
         match self.shape {
-            KernelShape::Erratic => 16,
-            KernelShape::Composite
+            KernelShape::Erratic
+            | KernelShape::Composite
             | KernelShape::SpectralSoulPerkeo
             | KernelShape::ShopJoker
             | KernelShape::PackJoker
             | KernelShape::AnyJoker
             | KernelShape::Souls
-            | KernelShape::Perkeo => 16,
+            | KernelShape::Perkeo
+            | KernelShape::TagObservatory => 16,
             // Voucher + rolled second-pack searches find nearby hits where more workers cost extra.
             KernelShape::VoucherSecondPack => 8,
-            // Dual-tag Observatory checks have enough work to use the full complex-shape cap.
-            KernelShape::TagObservatory => 16,
             _ => 4,
         }
     }

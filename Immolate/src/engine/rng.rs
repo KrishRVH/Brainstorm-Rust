@@ -125,7 +125,7 @@ impl RngState {
     ) -> ErraticDraws<'a> {
         let idx = RngKey::Erratic.idx();
         let initialized_bit = 1_u32 << idx;
-        // Keep this local: a shared initializer outlined this hot path and cost 2.2-3.0%.
+        // Keep this local: sharing the initializer outlined this hot path in release builds.
         if self.initialized_mask & initialized_bit == 0 {
             self.nodes[idx] = initial_node(seed, RngKey::Erratic.name().as_bytes());
             self.initialized_mask |= initialized_bit;
