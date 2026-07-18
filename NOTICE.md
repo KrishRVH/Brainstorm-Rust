@@ -14,6 +14,3 @@ CC BY-NC-SA 4.0. See `LICENSE`.
 
 The original Immolate source reference is:
 https://github.com/SpectralPack/Immolate/tree/26f41efcc313f045bc8bdbf49e5851c56ac40b31
-
-`nativefs.lua` is third-party code by megagrump@pm.me and is licensed under the
-MIT License. Its copyright and permission notice are preserved in that file.

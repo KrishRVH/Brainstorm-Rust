@@ -25,6 +25,11 @@ such as config reads, seed-start generation, FFI argument setup, status text
 updates, or Balatro frame scheduling. For true Lua wall time, profile
 `Brainstorm.auto_reroll()` in game.
 
+DLL harness samples start after benchmark-argument conversion and, for the
+Original DLL, stdout redirection. They include the DLL call, result copy, and
+`free_result`, then stop before stdout restoration. This keeps harness-only
+setup out of both sides while retaining the ABI/result work paid by callers.
+
 ## Canonical Commands
 
 Build the Rust DLL used by Brainstorm Supercharged:
@@ -52,15 +57,18 @@ input DLLs before building, stages all three artifacts on the Windows-local
 temporary filesystem with equal DLL basenames and path lengths, records
 settings and pre-run hashes, runs alternating `A/B/B/A` and `B/A/A/B` cycles,
 and rejects any mid-run artifact change. Every result and scanned count must
-match. It retains the per-cycle ratios and deltas, and gates p50, p95, p99, and
+match. It retains the per-cycle ratios and deltas, and hard-gates p50, p95, and
 mean latency on stable majority-cycle losses or concordant paired-cycle median
-and pooled losses over both the configured ratio and absolute noise floor.
+and pooled losses over both the configured ratio and absolute noise floor. P99
+is always reported, but becomes a hard gate only with at least 1,000 samples per
+arm per cycle.
 
 The defaults are four cycles and 31 repeats. Treat any tail `watch` row as a
 prompt for a targeted confirmation with at least
-`BENCH_CURRENT_CYCLES=8 BENCH_REPEAT=101 BENCH_WARMUP=10`; do not relax the
-threshold after seeing the data. Keep other CPU work stopped. Set
-`BENCH_CANDIDATE_DLL` to compare two already-built artifacts. Set
+`BENCH_CURRENT_CYCLES=8 BENCH_REPEAT=501 BENCH_WARMUP=10`. Each arm runs twice
+per cycle, so 501 repeats provide 1,002 samples and enable the p99 hard gate.
+Do not relax the threshold after seeing the data. Keep other CPU work stopped.
+Set `BENCH_CANDIDATE_DLL` to compare two already-built artifacts. Set
 `BENCH_EXECUTOR=wine` only for a portability diagnostic; Wine timings are not
 release evidence because its scheduler behavior can differ from native
 Windows.
@@ -144,7 +152,11 @@ The mise tasks read these environment variables:
 `BENCH_REPEAT` controls repeated measurements for each case. Use at least
 `BENCH_REPEAT=3` for local comparisons and at least `BENCH_BUDGET=100000` when
 looking for meaningful regressions. `BENCH_WARMUP` controls discarded warmup
-calls before the measured samples.
+calls before the measured samples. The current/current comparator invokes each
+arm twice per cycle: its default 31 repeats produce 62 samples, making the
+reported p99 that cycle's maximum rather than a stable percentile. P99 remains
+report-only below 1,000 samples per arm per cycle and hard-gates without any
+threshold change at `BENCH_REPEAT>=500`.
 
 `BENCH_MIN_RATIO=1.0` makes the harness fail if any comparable user-facing
 Rust/original speedup drops below parity. Only the explicit `baseline-hit`
@@ -153,6 +165,7 @@ starting seed after exactly one candidate. Other measured ratios are marked
 informational and never enter the threshold because the two DLLs traverse seeds
 in different orders. Set `BENCH_MIN_RATIO=0.0` only when you want a diagnostic
 report without a speed gate.
+`BENCH_MIN_RATIO` must be finite and non-negative.
 
 `BENCH_FAIL_ON_MISMATCH=0` keeps Rust/original result differences report-only,
 which is the default because the Original DLL is a historical performance
@@ -172,7 +185,7 @@ includes:
 - skipped original measurements for unsupported older-ABI fixtures
 - informational Rust/original result mismatches where the historical DLL differs
 - scanned percentage, so early-hit fixtures are obvious
-- mean latency, p50/p95/p99 latency, min/max latency, and stdev
+- mean and p95 latency (full distribution metrics remain available in TSV)
 - `ns/seed`, which is often the clearest hot-path metric
 - coefficient of variation (`cv`) to flag noisy measurements
 - Rust/original speedup ratio
@@ -257,7 +270,7 @@ These are measured policies, not general abstractions. Keep the independent
 
 | Surface | Retained policy | Reopen only with |
 | --- | --- | --- |
-| Current regression gate | Compare two current-ABI DLLs natively on Windows with `bench-current-compare`; historical and Wine ratios are context only. | Exact result/scanned equality plus frozen, counterbalanced native-Windows p50/p95/p99/mean data. |
+| Current regression gate | Compare two current-ABI DLLs natively on Windows with `bench-current-compare`; the default hard-gates p50/p95/mean and reports p99. Historical and Wine ratios are context only. | Exact result/scanned equality plus frozen, counterbalanced native-Windows data; confirm p99 with at least 1,000 samples per arm per cycle. |
 | Scheduler shapes | Expensive mixed/Joker/Soul/Perkeo/Erratic work may use 16 auto threads; nearby voucher/second-pack hits stay capped at 8. Prefixes and chunks remain shape-local in `CompiledFilter`. | Windows data across early hits, full misses, `threads=0`, and `threads=1`; no stable tail loss. |
 | Erratic draws | `ErraticDraws` owns one initialized RNG cursor and derives only face/suit properties from the exact mantissa. | Boundary and million-sample parity against the float/source path. |
 | Seed progression | Fuse sequential seed increment and hash update, but keep arbitrary-ID construction normalized and independently tested. | Carry, growth, wrap, cache-validity, and earliest-result proofs. |
@@ -302,7 +315,9 @@ Before changing hot-path code:
 2. Freeze the current DLL under a unique name before editing.
 3. Run native `bench-current-compare` for the complete and UX catalogs at
    realistic budgets with `BENCH_THREADS=0`; investigate every regression or
-   tail `watch`, then use `BENCH_THREADS=1` only as a diagnostic.
+   tail `watch`. Confirm a p99 signal with
+   `BENCH_REPEAT=501 BENCH_CURRENT_CYCLES=8 BENCH_WARMUP=10`; use
+   `BENCH_THREADS=1` only as a diagnostic.
 4. Inspect the historical report only for context; all non-baseline legacy
    ratios are informational because the seed orders differ.
 

@@ -32,10 +32,16 @@ if ! command -v luarocks >/dev/null; then
 fi
 
 export PATH="$HOME/.luarocks/bin:$PATH"
-if ! command -v luacheck >/dev/null; then
-  luarocks --local install luacheck
+luacheck_rock="1.2.0-1"
+if ! luarocks --local show luacheck "$luacheck_rock" >/dev/null 2>&1; then
+  luarocks --local install luacheck "$luacheck_rock"
 fi
-luacheck --version
+luacheck_version="$(luacheck --version | sed -n '1p')"
+[ "$luacheck_version" = "Luacheck: 1.2.0" ] || {
+  echo "expected Luacheck 1.2.0, found: $luacheck_version"
+  exit 1
+}
+printf '%s\n' "$luacheck_version"
 '''
 
 [tasks.doctor]
@@ -249,7 +255,7 @@ exports="$(
     sed -n '/^\[Ordinal\/Name Pointer\] Table/,/^$/p' |
     awk '/\[[[:space:]]*[0-9]+\]/{print $NF}'
 )"
-expected="$(printf '%s\n' brainstorm_search free_result immolate_last_error immolate_set_log_path | sort)"
+expected="$(printf '%s\n' brainstorm_search free_result immolate_set_log_path | sort)"
 actual="$(printf '%s\n' "$exports" | sort)"
 if [ "$actual" != "$expected" ]; then
   echo "unexpected Rust DLL exports:"
@@ -496,15 +502,20 @@ mise run check-rust
 '''
 
 [tasks.test-lua]
-description = "Run mocked Lua frame and status-text lifecycle smoke"
-run = "luajit tests/lua_lifecycle_smoke.lua \"$(pwd)\""
+description = "Run mocked Lua module, frame, and status-text lifecycle smoke"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+luajit tests/lua_lifecycle_smoke.lua "$(pwd)"
+luajit tests/lua_ui_smoke.lua "$(pwd)"
+'''
 
 [tasks.format]
 description = "Format Lua and Rust"
 shell = "bash -c"
 run = '''
 set -euo pipefail
-lua_files=(Brainstorm.lua UI.lua steamodded_compat.lua nativefs.lua tests/lua_lifecycle_smoke.lua)
+lua_files=(Brainstorm.lua UI.lua steamodded_compat.lua tests/lua_lifecycle_smoke.lua tests/lua_ui_smoke.lua)
 stylua "${lua_files[@]}"
 cargo fmt --manifest-path "$IMMO_DIR/Cargo.toml"
 '''
@@ -515,8 +526,8 @@ shell = "bash -c"
 run = '''
 set -euo pipefail
 export PATH="$HOME/.luarocks/bin:$PATH"
-lua_files=(Brainstorm.lua UI.lua steamodded_compat.lua nativefs.lua)
-test_lua_files=(tests/lua_lifecycle_smoke.lua)
+lua_files=(Brainstorm.lua UI.lua steamodded_compat.lua)
+test_lua_files=(tests/lua_lifecycle_smoke.lua tests/lua_ui_smoke.lua)
 syntax_lua_files=("${lua_files[@]}" "${test_lua_files[@]}")
 luacheck_files=("${lua_files[@]}" "${test_lua_files[@]}")
 
@@ -526,7 +537,7 @@ command -v luacheck >/dev/null || { echo "luacheck not found. Run: mise run setu
 
 stylua --check "${lua_files[@]}" "${test_lua_files[@]}"
 for lua_file in "${syntax_lua_files[@]}"; do
-  luajit -b "$lua_file" "/tmp/brainstorm-${lua_file//\//-}.luajit"
+  luajit -b "$lua_file" /dev/null
 done
 luacheck "${luacheck_files[@]}"
 mise run check-version
@@ -569,13 +580,10 @@ rust_artifact="$TARGET_DIR/rust/$DLL"
 
 rm -rf "$stage_root"
 mkdir -p "$stage_dir"
-cp Brainstorm.lua UI.lua lovely.toml nativefs.lua steamodded_compat.lua LICENSE NOTICE.md "$stage_dir"/
+cp Brainstorm.lua UI.lua lovely.toml steamodded_compat.lua LICENSE NOTICE.md "$stage_dir"/
 cp "$rust_artifact" "$stage_dir/$DLL"
 sed -i -E '0,/^dump_lua = .*/s//dump_lua = false/' "$stage_dir/lovely.toml"
-{
-  echo "$version_number"
-  date
-} > "$stage_dir/VERSION"
+printf '%s\n' "$version_number" > "$stage_dir/VERSION"
 '''
 
 [tasks.release]
@@ -636,7 +644,7 @@ fi
 
 echo "Deploying to $target"
 mkdir -p "$target"
-rsync -a --delete --exclude config.lua "$stage_dir"/ "$target"/
+rsync -a --delete "$stage_dir"/ "$target"/
 '''
 
 [tasks.clean]

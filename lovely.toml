@@ -1,12 +1,12 @@
 [manifest]
-version = "3.5"
+version = "3.6"
 dump_lua = true
 priority = 0
 
 [[patches]]
 [patches.module]
-name = 'nativefs'
-source = 'nativefs.lua'
+name = 'brainstorm_supercharged_ui'
+source = 'UI.lua'
 before = 'main.lua'
 
 [[patches]]

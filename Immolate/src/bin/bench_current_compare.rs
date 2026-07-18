@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const TSV_HEADER: &str = "kind\timpl\tcase\tgroup\tshape\tbudget\tscanned\tscan_pct\tthreads\tsample\telapsed_ms\tseeds_per_sec\tns_per_seed\tmin_ms\tp50_ms\tp95_ms\tp99_ms\tmax_ms\tstdev_ms\tcv_pct\tresult";
 const METRICS: [Metric; 4] = [Metric::P50, Metric::P95, Metric::P99, Metric::Mean];
+const MIN_P99_SAMPLES_PER_ARM_CYCLE: usize = 1_000;
 const USAGE: &str = "usage: bench_current_compare --harness PATH --baseline PATH --candidate PATH [--executor native|wine] [--native-stage-dir PATH] [--case SELECTOR] [--budget N] [--threads N] [--repeat N] [--warmup N] [--cycles N] [--min-ratio N] [--min-regression-ms N]";
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -349,6 +350,12 @@ fn validate_args(args: &Args) -> Result<(), String> {
 }
 
 fn emit_settings(args: &Args) {
+    let samples_per_arm_cycle = args.repeat.saturating_mul(2);
+    let p99_gate = if samples_per_arm_cycle >= MIN_P99_SAMPLES_PER_ARM_CYCLE {
+        "hard"
+    } else {
+        "report-only"
+    };
     for (name, value) in [
         ("executor", args.executor.label().to_owned()),
         ("case", args.case.clone()),
@@ -361,6 +368,12 @@ fn emit_settings(args: &Args) {
         ("min_ratio", format!("{:?}", args.min_ratio)),
         ("min_regression_ms", format!("{:?}", args.min_regression_ms)),
         ("metrics", "p50,p95,p99,mean".to_owned()),
+        (
+            "p99_gate",
+            format!(
+                "{p99_gate};samples_per_arm_cycle={samples_per_arm_cycle};minimum={MIN_P99_SAMPLES_PER_ARM_CYCLE}"
+            ),
+        ),
     ] {
         println!("setting\t{name}\t{value}");
     }
@@ -821,8 +834,10 @@ fn analyze_samples(samples: &Samples, args: &Args) -> Result<(Vec<MetricRow>, Fa
                 paired_delta_ms > args.min_regression_ms && paired_ratio < args.min_ratio;
             let pooled_regression =
                 is_regression(pooled_a, pooled_b, args.min_ratio, args.min_regression_ms);
-            let failed =
+            let detected_regression =
                 regression_cycles > args.cycles / 2 || (paired_regression && pooled_regression);
+            let failed = detected_regression
+                && (metric != Metric::P99 || expected_per_arm >= MIN_P99_SAMPLES_PER_ARM_CYCLE);
             if failed {
                 failures.insert((case.clone(), metric));
             }
@@ -1075,8 +1090,14 @@ mod tests {
         assert_eq!(analyzed.as_ref().ok().map(|(rows, _)| rows.len()), Some(4));
         assert_eq!(
             analyzed.as_ref().ok().map(|(_, failures)| failures.len()),
-            Some(4)
+            Some(3)
         );
+        assert!(analyzed.as_ref().is_ok_and(|(rows, failures)| {
+            !failures.contains(&("synthetic".to_owned(), Metric::P99))
+                && rows
+                    .iter()
+                    .any(|row| row.metric == Metric::P99 && row.status == "watch")
+        }));
 
         let mut mismatched = samples;
         if let Some(runs) = mismatched.get_mut(&("synthetic".to_owned(), 1, Arm::B))
@@ -1168,11 +1189,66 @@ mod tests {
         assert!(analyzed.as_ref().is_ok_and(|(rows, failures)| {
             !failures.contains(&("tail".to_owned(), Metric::P50))
                 && failures.contains(&("tail".to_owned(), Metric::P95))
-                && failures.contains(&("tail".to_owned(), Metric::P99))
+                && !failures.contains(&("tail".to_owned(), Metric::P99))
                 && rows
                     .iter()
                     .any(|row| row.metric == Metric::P95 && row.status == "regression")
+                && rows
+                    .iter()
+                    .any(|row| row.metric == Metric::P99 && row.status == "watch")
         }));
+    }
+
+    #[test]
+    fn default_sample_count_reports_max_as_p99_without_hard_failing() {
+        let values = (0_u32..62).map(f64::from).collect::<Vec<_>>();
+        assert_eq!(metric_value(&values, Metric::P99), Ok(61.0));
+
+        let args = args(4, 31);
+        let mut samples = Samples::new();
+        for cycle in 1..=args.cycles {
+            let baseline = repeated_run(1.0, 62);
+            let mut candidate = baseline.clone();
+            if let Some(outlier) = candidate.last_mut() {
+                outlier.elapsed_ms = 1.1;
+            }
+            samples.insert(("tail".to_owned(), cycle, Arm::A), baseline);
+            samples.insert(("tail".to_owned(), cycle, Arm::B), candidate);
+        }
+
+        let analyzed = analyze_samples(&samples, &args);
+        assert!(analyzed.as_ref().is_ok_and(|(rows, failures)| {
+            failures.is_empty()
+                && rows
+                    .iter()
+                    .any(|row| row.metric == Metric::P99 && row.status == "watch")
+        }));
+    }
+
+    #[test]
+    fn sufficiently_sampled_p99_regression_hard_fails() {
+        for repeat in [500, 501] {
+            let args = args(3, repeat);
+            let sample_count = repeat * 2;
+            let mut samples = Samples::new();
+            for cycle in 1..=args.cycles {
+                let baseline = repeated_run(1.0, sample_count);
+                let mut candidate = baseline.clone();
+                for tail in candidate.iter_mut().rev().take(12) {
+                    tail.elapsed_ms = 1.02;
+                }
+                samples.insert(("tail".to_owned(), cycle, Arm::A), baseline);
+                samples.insert(("tail".to_owned(), cycle, Arm::B), candidate);
+            }
+
+            let analyzed = analyze_samples(&samples, &args);
+            assert!(analyzed.as_ref().is_ok_and(|(rows, failures)| {
+                failures.contains(&("tail".to_owned(), Metric::P99))
+                    && rows
+                        .iter()
+                        .any(|row| row.metric == Metric::P99 && row.status == "regression")
+            }));
+        }
     }
 
     #[test]

@@ -1,9 +1,24 @@
 -- Brainstorm Supercharged UI Module
 -- Full rewrite by KRVH. Originals: Brainstorm by OceanRamen; Immolate by MathIsFun0.
 
+local Brainstorm = Brainstorm
+local G = G
 local ipairs = ipairs
 local pairs = pairs
 local string_lower = string.lower
+
+local function option_name_less(a, b)
+  if a == b then
+    return false
+  end
+  if a == "None" then
+    return true
+  end
+  if b == "None" then
+    return false
+  end
+  return a < b
+end
 
 -- Note: "Speed Tag" is internally called "tag_skip" in Balatro
 local tag_list = {
@@ -69,18 +84,7 @@ local function build_sorted_keys(list)
   for key in pairs(list) do
     keys[#keys + 1] = key
   end
-  table.sort(keys, function(a, b)
-    if a == b then
-      return false
-    end
-    if a == "None" then
-      return true
-    end
-    if b == "None" then
-      return false
-    end
-    return a < b
-  end)
+  table.sort(keys, option_name_less)
   return keys
 end
 
@@ -161,18 +165,7 @@ local function rebuild_joker_options()
       end
     end
   end
-  table.sort(joker_keys, function(a, b)
-    if a == b then
-      return false
-    end
-    if a == "None" then
-      return true
-    end
-    if b == "None" then
-      return false
-    end
-    return a < b
-  end)
+  table.sort(joker_keys, option_name_less)
 end
 
 local spf_list = Brainstorm.SPF_LIST
@@ -182,6 +175,12 @@ local ratio_list = Brainstorm.RATIO_MAP
 
 local ratio_keys =
   { "Disabled", "50%", "60%", "65%", "70%", "75%", "80%", "85%" }
+
+local soul_count_options = { 0, 1 }
+local face_count_options = {}
+for i = 0, 35 do
+  face_count_options[#face_count_options + 1] = i
+end
 
 local function option_index_for_value(options, value)
   if value == nil or value == "" then
@@ -497,7 +496,7 @@ function Brainstorm.build_settings_tab()
                 label = "AR: N. SOULS",
                 scale = 0.8,
                 w = 4,
-                options = { 0, 1 },
+                options = soul_count_options,
                 opt_callback = "change_soul_count",
                 current_option = (Brainstorm.config.ar_filters.soul_skip or 0)
                   + 1,
@@ -507,13 +506,7 @@ function Brainstorm.build_settings_tab()
                 scale = 0.8,
                 w = 4,
                 no_pips = true,
-                options = (function()
-                  local opts = {}
-                  for i = 0, 35 do
-                    opts[#opts + 1] = i
-                  end
-                  return opts
-                end)(),
+                options = face_count_options,
                 opt_callback = "change_face_count",
                 current_option = (Brainstorm.config.ar_prefs.face_count or 0)
                   + 1,
@@ -598,3 +591,5 @@ if not Brainstorm._ui_hooks.create_tabs then
     return Brainstorm._ui_hooks.create_tabs(args)
   end
 end
+
+return true

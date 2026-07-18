@@ -1,32 +1,33 @@
 -- luacheck: ignore 131/love 131/Controller 131/create_UIBox_round_scores_row 131/Event 131/UIBox
 
 local repo = assert(arg[1], "repository path is required")
+local native_calls = {}
+local native_loads = 0
+local native_handle_ref = setmetatable({}, { __mode = "v" })
 
 package.preload.lovely = function()
   return { mod_dir = repo }
 end
-package.preload.nativefs = function()
-  return {
-    getInfo = function()
-      return nil
-    end,
-    read = function()
-      return nil
-    end,
-    write = function()
-      return true
-    end,
-    createDirectory = function()
-      return true
-    end,
-  }
-end
 package.preload.ffi = function()
   return {
+    NULL = {},
     cdef = function() end,
-    load = function()
-      error("native loading is outside this lifecycle smoke")
+    load = function(path)
+      assert(path == repo .. "/Brainstorm/Immolate.dll")
+      native_loads = native_loads + 1
+      local handle = {
+        brainstorm_search = function(...)
+          native_calls[#native_calls + 1] = { ... }
+          return nil
+        end,
+        free_result = function()
+          error("nil native results must not be freed")
+        end,
+      }
+      native_handle_ref[1] = handle
+      return handle
     end,
+    string = tostring,
   }
 end
 
@@ -36,6 +37,10 @@ local deleted_runs = 0
 local queued_events = {}
 local captured_uibox
 local removed_boxes = 0
+local created_directory
+local written_config_path
+local written_config
+local ui_loads = 0
 
 love = {
   timer = {
@@ -49,8 +54,17 @@ love = {
     end,
   },
   filesystem = {
-    getSaveDirectory = function()
-      return repo
+    createDirectory = function(path)
+      created_directory = path
+      return true
+    end,
+    read = function()
+      return nil
+    end,
+    write = function(path, contents)
+      written_config_path = path
+      written_config = contents
+      return true
     end,
   },
 }
@@ -103,6 +117,14 @@ copy_table = function(value)
   end
   return result
 end
+STR_PACK = function()
+  return "packed config"
+end
+local seed_number = 0
+random_string = function()
+  seed_number = seed_number + 1
+  return ("SEED%04d"):format(seed_number)
+end
 UIBox = function(args)
   captured_uibox = args
   local box = {
@@ -117,6 +139,59 @@ UIBox = function(args)
 end
 
 assert(loadfile(repo .. "/Brainstorm.lua"))()
+assert(Brainstorm.init() == false)
+assert(Brainstorm.PATH == repo .. "/Brainstorm")
+assert(Brainstorm.config_path() == "Brainstorm/config.lua")
+assert(created_directory == "Brainstorm")
+assert(written_config_path == "Brainstorm/config.lua")
+assert(written_config == "packed config")
+
+local config_identity = Brainstorm.config
+Brainstorm.reset_config()
+assert(Brainstorm.config == config_identity)
+
+package.preload.brainstorm_supercharged_ui = function()
+  error("synthetic UI module failure")
+end
+assert(Brainstorm.init() == false)
+
+package.preload.brainstorm_supercharged_ui = function()
+  ui_loads = ui_loads + 1
+  return true
+end
+assert(Brainstorm.init())
+assert(Brainstorm.init())
+assert(ui_loads == 1)
+
+written_config = nil
+love.filesystem.read = function(path)
+  assert(path == "Brainstorm/config.lua")
+  return "existing config"
+end
+STR_UNPACK = function(packed)
+  assert(packed == "existing config")
+  return {
+    enable = false,
+    ar_filters = { pack = "p_arcana_normal_1" },
+    ar_prefs = { spf_int = 250000, suit_ratio_percent = "75%" },
+  }
+end
+Brainstorm.load_config()
+assert(Brainstorm.config == config_identity)
+assert(not Brainstorm.config.enable)
+assert(Brainstorm.config.ar_filters.pack == "p_arcana_normal_1")
+assert(Brainstorm.config.ar_prefs.spf_int == 250000)
+assert(Brainstorm.config.ar_prefs.suit_ratio_percent == "75%")
+assert(written_config == nil)
+
+love.filesystem.read = function()
+  error("synthetic config read failure")
+end
+assert(pcall(Brainstorm.load_config))
+love.filesystem.write = function()
+  error("synthetic config write failure")
+end
+assert(pcall(Brainstorm.write_config))
 
 local normalized = Brainstorm.normalize_config({
   ar_filters = {
@@ -154,6 +229,104 @@ assert(
   Brainstorm.normalize_config({ ar_filters = { pack = { "legacy" } } }).ar_filters.pack
     == ""
 )
+
+local function assert_native_call(actual, expected)
+  assert(#actual == 17)
+  for index = 1, 17 do
+    assert(
+      actual[index] == expected[index],
+      ("native argument %d: expected %s, got %s"):format(
+        index,
+        tostring(expected[index]),
+        tostring(actual[index])
+      )
+    )
+  end
+end
+
+local filters = Brainstorm.config.ar_filters
+local prefs = Brainstorm.config.ar_prefs
+Brainstorm.config.enable = true
+filters.voucher_name = "v_telescope"
+filters.pack = "p_arcana_normal_1"
+filters.tag_name = "tag_charm"
+filters.tag2_name = "tag_meteor"
+filters.joker_name = "Blueprint"
+filters.joker_location = "shop"
+filters.soul_skip = 1
+filters.inst_observatory = true
+filters.inst_perkeo = false
+prefs.face_count = 12
+prefs.suit_ratio_percent = "75%"
+prefs.spf_int = 100000
+G.GAME = {
+  stake = 2,
+  seeded = true,
+  selected_back_key = { key = "b_red" },
+  starting_params = {},
+}
+assert(Brainstorm.auto_reroll() == nil)
+
+filters.voucher_name = "v_clearance_sale"
+filters.pack = "p_spectral_mega_1"
+filters.tag_name = "tag_buffoon"
+filters.tag2_name = "tag_rare"
+filters.joker_name = "Brainstorm"
+filters.joker_location = "pack"
+filters.soul_skip = 0
+filters.inst_observatory = false
+filters.inst_perkeo = true
+prefs.face_count = 27
+prefs.suit_ratio_percent = "85%"
+prefs.spf_int = 250000
+G.GAME.selected_back_key.key = "b_erratic"
+G.GAME.starting_params.erratic_suits_and_ranks = true
+G.GAME.starting_params.no_faces = true
+assert(Brainstorm.auto_reroll() == nil)
+
+assert(Brainstorm.config == config_identity)
+assert(native_loads == 1 and #native_calls == 2)
+assert_native_call(native_calls[1], {
+  "SEED0001",
+  "v_telescope",
+  "p_arcana_normal_1",
+  "tag_charm",
+  "tag_meteor",
+  "Blueprint",
+  "shop",
+  1,
+  true,
+  false,
+  "b_red",
+  false,
+  false,
+  12,
+  0.75,
+  100000,
+  0,
+})
+assert_native_call(native_calls[2], {
+  "SEED0002",
+  "v_clearance_sale",
+  "p_spectral_mega_1",
+  "tag_buffoon",
+  "tag_rare",
+  "Brainstorm",
+  "pack",
+  0,
+  false,
+  true,
+  "b_erratic",
+  true,
+  true,
+  27,
+  0.85,
+  250000,
+  0,
+})
+collectgarbage()
+collectgarbage()
+assert(native_handle_ref[1] ~= nil)
 
 local function reset_active()
   Brainstorm.ar_active = true

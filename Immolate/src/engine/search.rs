@@ -42,9 +42,12 @@ fn search_filters(
     num_seeds: i64,
     requested_threads: i32,
 ) -> Option<String> {
-    let start_seed = Seed::from(seed_start).id();
     if cfg.shape == KernelShape::NoMatch {
         return None;
+    }
+    let start_seed = Seed::from(seed_start).id();
+    if cfg.shape == KernelShape::NoFilter {
+        return Some(Seed::from_id(start_seed).to_string());
     }
     if requested_threads == 1 {
         return search_block(start_seed, num_seeds, &cfg);

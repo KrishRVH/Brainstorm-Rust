@@ -54,11 +54,6 @@ exclude_files = {
     "BalatroSource/**"
 }
 
-files["nativefs.lua"] = {
-    unused_args = false,
-    unused_secondaries = false,
-}
-
 files["tests/*.lua"] = {
     globals = { "love" },
     unused_args = false,

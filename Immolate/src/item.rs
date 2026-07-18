@@ -2,7 +2,7 @@
 #![allow(non_camel_case_types)]
 #![allow(clippy::match_same_arms)]
 
-#[repr(usize)]
+#[repr(u16)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[allow(clippy::upper_case_acronyms)]
 pub(crate) enum Item {
@@ -1230,7 +1230,7 @@ pub(crate) fn item_to_string(item: Item) -> &'static str {
         Item::Hiker => "Hiker",
         Item::Card_Sharp => "Card Sharp",
         Item::Madness => "Madness",
-        Item::Seance => "S\u{398}ance",
+        Item::Seance => "Seance",
         Item::Shortcut => "Shortcut",
         Item::Hologram => "Hologram",
         Item::Cloud_9 => "Cloud 9",
@@ -1743,7 +1743,7 @@ pub(crate) fn string_to_item(name: &str) -> Item {
         "Hiker" => Item::Hiker,
         "Card Sharp" => Item::Card_Sharp,
         "Madness" => Item::Madness,
-        "S\u{398}ance" => Item::Seance,
+        "Seance" => Item::Seance,
         "Shortcut" => Item::Shortcut,
         "Hologram" => Item::Hologram,
         "Cloud 9" => Item::Cloud_9,

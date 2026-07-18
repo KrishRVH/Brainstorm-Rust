@@ -5,13 +5,11 @@
 -- Entry point loaded by lovely.toml; initializes config, UI, and game hooks.
 
 local lovely = require("lovely")
-local nfs = require("nativefs")
 local ffi = require("ffi")
+local G = G
 
 _G.Brainstorm = _G.Brainstorm or {}
-Brainstorm = _G.Brainstorm
-
-Brainstorm.VERSION = Brainstorm.VERSION or "Brainstorm Supercharged"
+local Brainstorm = _G.Brainstorm
 
 Brainstorm.SPF_KEYS = {
   "1000",
@@ -109,8 +107,9 @@ Brainstorm.AR_STATUS_INTERVAL = 0.15
 local pcall = pcall
 local get_time = love and love.timer and love.timer.getTime
 
-local CONFIG_DIR_NAME = "Brainstorm"
+local DIRECTORY_NAME = "Brainstorm"
 local CONFIG_FILE_NAME = "config.lua"
+local UI_MODULE = "brainstorm_supercharged_ui"
 
 local SEED_X_FACTOR = 0.33411983
 local SEED_Y_FACTOR = 0.874146
@@ -141,22 +140,6 @@ local function as_string(value)
   return tostring(value)
 end
 
-local function load_version_info()
-  if not Brainstorm.PATH then
-    return
-  end
-
-  local lovely_content = nfs.read(Brainstorm.PATH .. "/lovely.toml")
-  if not lovely_content then
-    return
-  end
-
-  local version = lovely_content:match('version%s*=%s*"([^"]+)"')
-  if version then
-    Brainstorm.VERSION = "Brainstorm Supercharged v" .. version
-  end
-end
-
 local function as_number(value, default)
   local num = tonumber(value)
   if num == nil then
@@ -177,7 +160,7 @@ local function as_int(value, default)
 end
 
 local function as_bool(value)
-  return value and true or false
+  return not not value
 end
 
 local function clamp_int(value, default, min_value, max_value)
@@ -221,7 +204,7 @@ local function assign_table(target, source)
     target[key] = nil
   end
   for key, value in pairs(source) do
-    target[key] = clone_table(value)
+    target[key] = value
   end
 end
 
@@ -343,54 +326,17 @@ local function update_auto_reroll_status(force)
     .. " seeds"
 end
 
-local function current_seed_budget()
-  local prefs = Brainstorm.config and Brainstorm.config.ar_prefs
+local function current_seed_budget(prefs)
   if not prefs then
     return nil
   end
 
-  local seed_budget = as_int(prefs.spf_int, 0)
-  if not Brainstorm.SPF_LIST[tostring(seed_budget)] then
-    normalize_spf(prefs)
-    seed_budget = as_int(prefs.spf_int, 0)
-  end
-  if Brainstorm.SPF_LIST[tostring(seed_budget)] then
+  local seed_budget = Brainstorm.SPF_LIST[tostring(as_int(prefs.spf_int, 0))]
+  if seed_budget then
     return seed_budget
   end
-  return nil
-end
-
-local function file_exists(file_path)
-  if type(file_path) ~= "string" or file_path == "" then
-    return false
-  end
-  local success, info = pcall(nfs.getInfo, file_path)
-  return success and info ~= nil
-end
-
-local function directory_exists(directory)
-  if type(directory) ~= "string" or directory == "" then
-    return false
-  end
-  local success, info = pcall(nfs.getInfo, directory, "directory")
-  return success and info ~= nil
-end
-
-local function has_mod_markers(directory)
-  return file_exists(directory .. "/lovely.toml")
-    and file_exists(directory .. "/Brainstorm.lua")
-    and file_exists(directory .. "/UI.lua")
-end
-
-local function get_save_directory()
-  if not (love and love.filesystem and love.filesystem.getSaveDirectory) then
-    return nil
-  end
-  local success, directory = pcall(love.filesystem.getSaveDirectory)
-  if not success or type(directory) ~= "string" or directory == "" then
-    return nil
-  end
-  return directory
+  normalize_spf(prefs)
+  return prefs.spf_int
 end
 
 function Brainstorm.config_path()
@@ -398,14 +344,14 @@ function Brainstorm.config_path()
     return Brainstorm.CONFIG_PATH
   end
 
-  local save_directory = get_save_directory()
-  if save_directory then
-    local config_directory = save_directory .. "/" .. CONFIG_DIR_NAME
-    local create_success, created = pcall(nfs.createDirectory, config_directory)
-    if (create_success and created) or directory_exists(config_directory) then
-      Brainstorm.CONFIG_PATH = config_directory .. "/" .. CONFIG_FILE_NAME
-      return Brainstorm.CONFIG_PATH
-    end
+  if not (love and love.filesystem and love.filesystem.createDirectory) then
+    return nil
+  end
+  local success, created =
+    pcall(love.filesystem.createDirectory, DIRECTORY_NAME)
+  if success and created then
+    Brainstorm.CONFIG_PATH = DIRECTORY_NAME .. "/" .. CONFIG_FILE_NAME
+    return Brainstorm.CONFIG_PATH
   end
 
   return nil
@@ -436,23 +382,15 @@ local function report_auto_reroll_error(message)
   Brainstorm.save_state_alert(message)
 end
 
-local function find_brainstorm_directory(directory)
-  if type(directory) ~= "string" or directory == "" then
-    return nil
-  end
-  local exact_path = directory .. "/Brainstorm"
-  if directory_exists(exact_path) and has_mod_markers(exact_path) then
-    return exact_path
-  end
-  return nil
-end
-
 function Brainstorm.load_config()
   local config_path = Brainstorm.config_path()
-  local config_file = config_path
-      and file_exists(config_path)
-      and nfs.read(config_path)
-    or nil
+  local config_file
+  if config_path then
+    local read_success, contents = pcall(love.filesystem.read, config_path)
+    if read_success then
+      config_file = contents
+    end
+  end
 
   if not config_file then
     assign_table(
@@ -483,36 +421,21 @@ function Brainstorm.write_config()
   end
   local success, packed = pcall(STR_PACK, Brainstorm.config)
   if success and packed then
-    nfs.write(config_path, packed)
+    pcall(love.filesystem.write, config_path, packed)
   end
 end
 
 function Brainstorm.init()
-  Brainstorm.PATH = find_brainstorm_directory(lovely.mod_dir)
-  if not Brainstorm.PATH then
+  if type(lovely.mod_dir) ~= "string" or lovely.mod_dir == "" then
     return false
   end
-  load_version_info()
-
+  Brainstorm.PATH = lovely.mod_dir .. "/" .. DIRECTORY_NAME
   Brainstorm.load_config()
-
-  local ui_path = Brainstorm.PATH .. "/UI.lua"
-  local ui_content = nfs.read(ui_path)
-  if not ui_content then
-    return false
-  end
-
-  local ui_func = load(ui_content)
-  if not ui_func then
-    return false
-  end
-
-  local success = pcall(ui_func)
+  local success = pcall(require, UI_MODULE)
   if not success then
-    return false
+    package.loaded[UI_MODULE] = nil
   end
-
-  return true
+  return success
 end
 
 local save_state_keys = { "1", "2", "3", "4", "5" }
@@ -599,7 +522,6 @@ function Brainstorm.load_game_state(slot)
 end
 
 function Brainstorm.reroll()
-  local G = G
   if not Brainstorm.is_enabled() or not is_run_stage() then
     return false
   end
@@ -619,12 +541,11 @@ end
 
 local function handle_brainstorm_keypress(key)
   if
-    not Brainstorm
-    or not Brainstorm.config
+    not Brainstorm.config
     or not Brainstorm.config.keybinds
     or not Brainstorm.is_enabled()
   then
-    if Brainstorm and Brainstorm.ar_active then
+    if Brainstorm.ar_active then
       Brainstorm.stop_auto_reroll()
     end
     return
@@ -643,6 +564,7 @@ local function handle_brainstorm_keypress(key)
       if love.keyboard.isDown(keybinds.load_state) then
         Brainstorm.load_game_state(slot)
       end
+      break
     end
   end
 
@@ -670,8 +592,31 @@ local function handle_brainstorm_keypress(key)
   end
 end
 
+local function run_auto_reroll_update()
+  local seed_found, err = Brainstorm.auto_reroll()
+  if seed_found == false then
+    Brainstorm.stop_auto_reroll()
+    report_auto_reroll_error(err)
+  elseif seed_found then
+    local stake = G.GAME.stake
+    local challenge = G.GAME and G.GAME.challenge and G.GAME.challenge_tab
+    G:delete_run()
+    G:start_run({
+      stake = stake,
+      seed = seed_found,
+      challenge = challenge,
+    })
+    G.GAME.used_filter = true
+    G.GAME.seeded = false
+    Brainstorm.stop_auto_reroll()
+  end
+  if Brainstorm.ar_active then
+    show_auto_reroll_text()
+  end
+end
+
 local function update_auto_reroll()
-  if not Brainstorm or not Brainstorm.ar_active then
+  if not Brainstorm.ar_active then
     return
   end
   if not Brainstorm.is_enabled() or not is_run_stage() then
@@ -679,28 +624,7 @@ local function update_auto_reroll()
     return
   end
 
-  local success = pcall(function()
-    local seed_found, err = Brainstorm.auto_reroll()
-    if seed_found == false then
-      Brainstorm.stop_auto_reroll()
-      report_auto_reroll_error(err)
-    elseif seed_found then
-      local stake = G.GAME.stake
-      local challenge = G.GAME and G.GAME.challenge and G.GAME.challenge_tab
-      G:delete_run()
-      G:start_run({
-        stake = stake,
-        seed = seed_found,
-        challenge = challenge,
-      })
-      G.GAME.used_filter = true
-      G.GAME.seeded = false
-      Brainstorm.stop_auto_reroll()
-    end
-    if Brainstorm.ar_active then
-      show_auto_reroll_text()
-    end
-  end)
+  local success = pcall(run_auto_reroll_update)
   if not success then
     Brainstorm.stop_auto_reroll()
   end
@@ -730,6 +654,10 @@ local ffi_loaded = false
 local native_handle = nil
 local DLL_NAME = "Immolate.dll"
 
+local function native_exports(handle)
+  return handle.brainstorm_search, handle.free_result
+end
+
 local function init_ffi()
   if not ffi_loaded then
     local success = pcall(
@@ -753,24 +681,13 @@ local function load_native()
   end
 
   local dll_path = Brainstorm.PATH .. "/" .. DLL_NAME
-  local dll_file = io.open(dll_path, "rb")
-  if not dll_file then
-    return nil
-  end
-  dll_file:close()
-
   local success, handle = pcall(ffi.load, dll_path)
   if not success then
     return nil
   end
 
-  local search_success, search_fn = pcall(function()
-    return handle.brainstorm_search
-  end)
-  local free_success, free_fn = pcall(function()
-    return handle.free_result
-  end)
-  if not search_success or not search_fn or not free_success or not free_fn then
+  local exports_success, search_fn, free_fn = pcall(native_exports, handle)
+  if not exports_success or not search_fn or not free_fn then
     return nil
   end
 
@@ -799,6 +716,10 @@ function Brainstorm.auto_reroll()
     return false, "Auto-reroll stopped (run unavailable)"
   end
 
+  local config = Brainstorm.config
+  local filters = config.ar_filters
+  local prefs = config.ar_prefs
+
   local seed_start = build_seed_start()
   if not seed_start then
     return false, "Auto-reroll stopped (seed generator unavailable)"
@@ -813,23 +734,18 @@ function Brainstorm.auto_reroll()
     return false, "Auto-reroll stopped (Immolate.dll missing)"
   end
 
-  local pack_key = as_string(Brainstorm.config.ar_filters.pack)
+  local pack_key = as_string(filters.pack)
   local selected_back = G.GAME and G.GAME.selected_back_key
   local deck_key = selected_back and as_string(selected_back.key) or ""
 
-  local erratic = G.GAME
-      and G.GAME.starting_params
-      and G.GAME.starting_params.erratic_suits_and_ranks
+  local starting_params = G.GAME and G.GAME.starting_params
+  local erratic = starting_params and starting_params.erratic_suits_and_ranks
     or false
-  local no_faces = G.GAME
-      and G.GAME.starting_params
-      and G.GAME.starting_params.no_faces
-    or false
+  local no_faces = starting_params and starting_params.no_faces or false
 
-  local min_face_cards = as_int(Brainstorm.config.ar_prefs.face_count, 0)
-  local suit_ratio = Brainstorm.RATIO_MAP[Brainstorm.config.ar_prefs.suit_ratio_percent]
-    or 0
-  local seed_budget = current_seed_budget()
+  local min_face_cards = as_int(prefs.face_count, 0)
+  local suit_ratio = Brainstorm.RATIO_MAP[prefs.suit_ratio_percent] or 0
+  local seed_budget = current_seed_budget(prefs)
   if not seed_budget then
     return false, "Auto-reroll stopped (invalid seed budget)"
   end
@@ -837,15 +753,15 @@ function Brainstorm.auto_reroll()
   local call_success, result = pcall(
     immolate.brainstorm_search,
     seed_start,
-    as_string(Brainstorm.config.ar_filters.voucher_name),
+    as_string(filters.voucher_name),
     pack_key,
-    as_string(Brainstorm.config.ar_filters.tag_name),
-    as_string(Brainstorm.config.ar_filters.tag2_name),
-    as_string(Brainstorm.config.ar_filters.joker_name),
-    as_string(Brainstorm.config.ar_filters.joker_location),
-    as_number(Brainstorm.config.ar_filters.soul_skip, 0),
-    as_bool(Brainstorm.config.ar_filters.inst_observatory),
-    as_bool(Brainstorm.config.ar_filters.inst_perkeo),
+    as_string(filters.tag_name),
+    as_string(filters.tag2_name),
+    as_string(filters.joker_name),
+    as_string(filters.joker_location),
+    as_number(filters.soul_skip, 0),
+    as_bool(filters.inst_observatory),
+    as_bool(filters.inst_perkeo),
     deck_key,
     as_bool(erratic),
     as_bool(no_faces),

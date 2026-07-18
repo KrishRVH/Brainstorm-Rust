@@ -53,8 +53,9 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
+          toolchain: 1.96.0
           targets: x86_64-pc-windows-gnu
 
       - name: Install system dependencies
@@ -103,7 +104,8 @@ jobs:
           )"
 
           gh release create "${RELEASE_TAG}" release-artifacts/* \
+            --draft \
             --verify-tag \
             --title "${RELEASE_TITLE}" \
-            --notes "${notes}" \
-            --latest
+            --notes "${notes}"
+          gh release edit "${RELEASE_TAG}" --draft=false --latest

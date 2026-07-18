@@ -33,7 +33,6 @@ pub struct CompiledFilter {
     pub(crate) wants_joker_shop: bool,
     pub(crate) wants_joker_pack: bool,
     pub(crate) target_joker_pools: u8,
-    pub(crate) selected_soulable_pack: bool,
     pub(crate) base_locks: Locks,
 }
 
@@ -63,7 +62,6 @@ impl CompiledFilter {
             wants_joker_shop,
             wants_joker_pack,
             target_joker_pools,
-            selected_soulable_pack: raw.pack == Item::RETRY || is_soulable_pack(raw.pack),
             base_locks,
         }
     }
@@ -134,7 +132,6 @@ fn classify(
 ) -> KernelShape {
     let has_tags = raw.tag1 != Item::RETRY || raw.tag2 != Item::RETRY;
     let has_voucher = raw.voucher != Item::RETRY;
-    let has_pack = raw.pack != Item::RETRY;
     let has_joker = raw.joker != Item::RETRY;
     let has_souls = raw.souls > 0;
     let has_erratic = raw.erratic && (raw.min_face_cards > 0 || raw.suit_ratio > 0.0);
@@ -149,10 +146,11 @@ fn classify(
     ) {
         return KernelShape::NoMatch;
     }
+    let pack_filter_requires_second_slot = !matches!(raw.pack, Item::RETRY | Item::Buffoon_Pack);
 
     if !has_tags
         && !has_voucher
-        && !has_pack
+        && !pack_filter_requires_second_slot
         && !raw.observatory
         && !has_joker
         && !has_souls
@@ -164,7 +162,7 @@ fn classify(
     if has_tags {
         if raw.observatory
             && !has_voucher
-            && !has_pack
+            && !pack_filter_requires_second_slot
             && !has_joker
             && !has_souls
             && !raw.perkeo
@@ -173,7 +171,7 @@ fn classify(
             return KernelShape::TagObservatory;
         }
         return if has_voucher
-            || has_pack
+            || pack_filter_requires_second_slot
             || raw.observatory
             || has_joker
             || has_souls
@@ -186,20 +184,20 @@ fn classify(
         };
     }
     if has_voucher {
-        return if has_pack
+        return if pack_filter_requires_second_slot
             && !raw.observatory
             && !has_joker
             && !has_souls
             && !raw.perkeo
             && !has_erratic
         {
-            if raw.pack == Item::Buffoon_Pack {
-                // The first shop slot is always this pack, so only the voucher can reject.
-                KernelShape::VoucherOnly
-            } else {
-                KernelShape::VoucherSecondPack
-            }
-        } else if has_pack || raw.observatory || has_joker || has_souls || raw.perkeo || has_erratic
+            KernelShape::VoucherSecondPack
+        } else if pack_filter_requires_second_slot
+            || raw.observatory
+            || has_joker
+            || has_souls
+            || raw.perkeo
+            || has_erratic
         {
             KernelShape::Composite
         } else {
@@ -207,14 +205,19 @@ fn classify(
         };
     }
     if has_erratic {
-        return if has_pack || raw.observatory || has_joker || has_souls || raw.perkeo {
+        return if pack_filter_requires_second_slot
+            || raw.observatory
+            || has_joker
+            || has_souls
+            || raw.perkeo
+        {
             KernelShape::Composite
         } else {
             KernelShape::Erratic
         };
     }
     if raw.observatory {
-        return if has_pack || has_joker || has_souls || raw.perkeo {
+        return if pack_filter_requires_second_slot || has_joker || has_souls || raw.perkeo {
             KernelShape::Composite
         } else {
             KernelShape::Observatory
@@ -224,7 +227,7 @@ fn classify(
         if has_souls || raw.perkeo {
             return KernelShape::Composite;
         }
-        if has_pack && wants_joker_shop && !wants_joker_pack {
+        if pack_filter_requires_second_slot && wants_joker_shop && !wants_joker_pack {
             return KernelShape::Composite;
         }
         return if wants_joker_shop && wants_joker_pack {
@@ -235,7 +238,7 @@ fn classify(
             KernelShape::PackJoker
         };
     }
-    if raw.perkeo && has_pack && is_spectral_pack(raw.pack) {
+    if raw.perkeo && pack_filter_requires_second_slot && is_spectral_pack(raw.pack) {
         return KernelShape::SpectralSoulPerkeo;
     }
     if has_souls {
@@ -248,7 +251,7 @@ fn classify(
     if raw.perkeo {
         return KernelShape::Perkeo;
     }
-    if has_pack {
+    if pack_filter_requires_second_slot {
         return KernelShape::PackOnly;
     }
     KernelShape::Generic

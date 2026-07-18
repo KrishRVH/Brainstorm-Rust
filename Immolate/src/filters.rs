@@ -286,7 +286,14 @@ fn parse_pack_key(key: &str) -> Item {
     if key.is_empty() {
         return Item::RETRY;
     }
-    match normalize_pack_key(key).as_str() {
+    let key = key.rsplit_once('_').map_or(key, |(base, suffix)| {
+        if !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+            base
+        } else {
+            key
+        }
+    });
+    match key {
         "p_arcana_normal" => Item::Arcana_Pack,
         "p_arcana_jumbo" => Item::Jumbo_Arcana_Pack,
         "p_arcana_mega" => Item::Mega_Arcana_Pack,
@@ -375,7 +382,7 @@ fn parse_joker_name(name: &str) -> Item {
     }
     let item = match name {
         "j_caino" | "j_canio" | "Caino" | "Canio" => Item::Canio,
-        "j_seance" | "Seance" => Item::Seance,
+        "j_seance" => Item::Seance,
         _ => Item::RETRY,
     };
     if is_joker_item(item) {
@@ -394,20 +401,6 @@ fn parse_joker_location(location: &str) -> JokerLocation {
         "shop" => JokerLocation::Shop,
         "pack" => JokerLocation::Pack,
         _ => JokerLocation::Any,
-    }
-}
-
-fn normalize_pack_key(key: &str) -> String {
-    let Some(pos) = key.rfind('_') else {
-        return key.to_owned();
-    };
-    if pos + 1 >= key.len() {
-        return key.to_owned();
-    }
-    if key[pos + 1..].bytes().all(|b| b.is_ascii_digit()) {
-        key[..pos].to_owned()
-    } else {
-        key.to_owned()
     }
 }
 

@@ -66,7 +66,8 @@ fn voucher_second_pack(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
 }
 
 fn pack_only(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
-    cfg.raw.pack == Item::Buffoon_Pack || second_pack_is(state, cfg.raw.pack)
+    debug_assert_ne!(cfg.raw.pack, Item::Buffoon_Pack);
+    second_pack_is(state, cfg.raw.pack)
 }
 
 fn observatory(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
@@ -90,9 +91,7 @@ fn tag_observatory(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
 }
 
 fn shop_joker(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
-    if cfg.target_joker_pools & STANDARD_JOKER_POOLS == 0 {
-        return false;
-    }
+    debug_assert_ne!(cfg.target_joker_pools & STANDARD_JOKER_POOLS, 0);
     shop_has_joker(
         state,
         cfg.raw.joker,
@@ -103,9 +102,7 @@ fn shop_joker(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
 }
 
 fn pack_joker(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
-    if cfg.target_joker_pools & STANDARD_JOKER_POOLS == 0 {
-        return false;
-    }
+    debug_assert_ne!(cfg.target_joker_pools & STANDARD_JOKER_POOLS, 0);
 
     if cfg.raw.pack == Item::RETRY || cfg.raw.pack == Item::Buffoon_Pack {
         if buffoon_pack_has_joker(
@@ -173,9 +170,7 @@ fn any_joker(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
 }
 
 fn souls(state: &mut SearchState, cfg: &CompiledFilter) -> bool {
-    if !cfg.selected_soulable_pack {
-        return false;
-    }
+    debug_assert!(cfg.raw.pack == Item::RETRY || is_soulable_pack(cfg.raw.pack));
     let pack = if cfg.raw.pack == Item::RETRY {
         roll_second_pack(state)
     } else {

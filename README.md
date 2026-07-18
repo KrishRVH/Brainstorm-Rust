@@ -1,6 +1,6 @@
 # Brainstorm Supercharged for Balatro
 
-Current release: **v3.5**.
+Current release: **v3.6**.
 
 **Just want to install it?** Open this repository's **Releases** page, select
 the release marked **Latest**, download the Brainstorm Supercharged zip, and
@@ -22,16 +22,22 @@ metadata, and compatibility fixes for the current Balatro mod stack.
 
 ## Setup (Required First)
 
-1. Install [`smods-1.0.0-beta` (Steamodded)](https://github.com/Steamodded/smods/wiki/Installing-Steamodded-windows#step-3-installing-steamodded) for Balatro.
+1. Install the [latest Steamodded release](https://github.com/Steamodded/smods/wiki/Installing-Steamodded-windows#step-3-installing-steamodded) for Balatro.
 2. Install [Lovely](https://github.com/ethangreen-dev/lovely-injector).
-3. Build the DLL from source:
+3. Prepare the development toolchain:
 
    ```bash
    mise trust
+   mise run setup
+   ```
+
+4. Build the DLL from source:
+
+   ```bash
    mise run build
    ```
 
-4. Deploy the mod from source:
+5. Deploy the mod from source:
 
    ```bash
    mise run deploy
@@ -101,8 +107,8 @@ then use `mise run <task>`.
 `mise run lint` runs Lua formatting, LuaJIT bytecode syntax checks, luacheck,
 rustfmt, clippy, and private-item rustdoc checks. `mise run check-rust` adds
 unit tests, DLL export/import validation, and hit/composite benchmark smokes.
-`mise run check` runs Lua lint, the mocked frame/status lifecycle smoke, and
-the Rust validation gate.
+`mise run check` runs Lua lint, the mocked module/frame/status lifecycle smoke,
+and the Rust validation gate.
 
 Strict user-facing regression check against a frozen current-ABI DLL:
 
@@ -118,9 +124,12 @@ mise run bench-full
 
 Both use the same `threads=0` path as Lua auto-reroll. The current/current
 command runs natively on Windows, freezes and hashes its artifacts, requires
-exact result/scanned equality, and gates p50/p95/p99/mean latency. Original-DLL
-ratios are informational except for the one-candidate baseline because its seed
-order differs. `BENCH_EXECUTOR=wine` is a portability diagnostic only.
+exact result/scanned equality, hard-gates p50/p95/mean latency, and reports p99.
+Confirm a p99 signal with 501 repeats and eight cycles, which supplies enough
+samples to enable its hard gate; `Immolate/BENCH.md` gives the exact command.
+Original-DLL ratios are informational except for the one-candidate baseline
+because its seed order differs. `BENCH_EXECUTOR=wine` is a portability
+diagnostic only.
 
 DLL UX-fixture benchmark report using UI-reachable cases and Lua-style
 `threads=0`:
@@ -170,9 +179,9 @@ version metadata agree, then creates an immutable release titled
 
 Download the latest release zip from
 https://github.com/KrishRVH/Brainstorm-Rust/releases/latest and extract it into
-`%AppData%\Roaming\Balatro\Mods\Brainstorm\` (same payload as
-`mise run deploy`).
-The folder name must be exactly `Brainstorm`.
+`%AppData%\Roaming\Balatro\Mods\`. The archive already contains the
+`Brainstorm` folder (the same payload produced by `mise run deploy`); its folder
+name must remain exactly `Brainstorm`.
 Reload the game to activate the mod.
 
 Copy the mod files into `%AppData%\Roaming\Balatro\Mods\Brainstorm\` if you
@@ -186,7 +195,6 @@ Brainstorm/
 ├── lovely.toml
 ├── LICENSE
 ├── NOTICE.md
-├── nativefs.lua
 ├── steamodded_compat.lua
 └── VERSION
 ```

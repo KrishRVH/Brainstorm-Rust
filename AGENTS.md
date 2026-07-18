@@ -21,7 +21,7 @@ DLL named Immolate. Keep agent work source-faithful, scoped, and validated.
 ## Project Map
 
 - Lua entry/UI: `Brainstorm.lua`, `UI.lua`.
-- Mod metadata/compat: `lovely.toml`, `steamodded_compat.lua`, `nativefs.lua`.
+- Mod metadata/compat: `lovely.toml`, `steamodded_compat.lua`.
 - Rust crate: `Immolate/`; implementation in `Immolate/src/`.
 - Benchmark catalog: `Immolate/src/bench_cases.rs`.
 - Rust DLL artifact: `target/rust/Immolate.dll`, staged as `Immolate.dll`.
@@ -120,6 +120,8 @@ DLL named Immolate. Keep agent work source-faithful, scoped, and validated.
   `latest` tag, force-move a release tag, edit an existing release in place, or
   upload release assets with `--clobber`. GitHub's **Latest** marker is release
   metadata, not a Git tag.
+- Keep GitHub release immutability enabled. Create each release as a draft,
+  attach every asset, then publish it so GitHub locks the assets and tag.
 - Ordinary `master` pushes do not publish releases. To release, run
   `VERSION=x.y mise run bump-version`, commit every resulting metadata change,
   then create and push the exact matching `vX.Y` tag. The tag must point to the

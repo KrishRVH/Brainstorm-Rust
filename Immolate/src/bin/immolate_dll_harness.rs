@@ -91,12 +91,21 @@ fn requires_strict_legacy_fixture(selected_case: &str) -> bool {
     matches!(selected_case, "all" | "baseline" | "baseline-hit")
 }
 
+#[cfg(any(windows, test))]
+fn validate_min_ratio(min_ratio: f64) -> Result<(), &'static str> {
+    if min_ratio.is_finite() && min_ratio >= 0.0 {
+        Ok(())
+    } else {
+        Err("--min-ratio must be finite and non-negative")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         LEGACY_SEED_SPACE, LegacyProbe, classify_legacy_probe, is_strict_legacy_comparison,
         legacy_empty_proves_mismatch, legacy_seed_id, legacy_seed_scan_count,
-        requires_strict_legacy_fixture,
+        requires_strict_legacy_fixture, validate_min_ratio,
     };
 
     #[test]
@@ -166,6 +175,16 @@ mod tests {
         assert!(!requires_strict_legacy_fixture("ux"));
         assert!(!requires_strict_legacy_fixture("ux-soul-no-pack"));
     }
+
+    #[test]
+    fn minimum_ratio_must_be_finite_and_non_negative() {
+        assert_eq!(validate_min_ratio(0.0), Ok(()));
+        assert_eq!(validate_min_ratio(1.0), Ok(()));
+        assert!(validate_min_ratio(-f64::EPSILON).is_err());
+        assert!(validate_min_ratio(f64::NAN).is_err());
+        assert!(validate_min_ratio(f64::INFINITY).is_err());
+        assert!(validate_min_ratio(f64::NEG_INFINITY).is_err());
+    }
 }
 
 #[cfg(windows)]
@@ -194,6 +213,7 @@ mod windows_harness {
     use super::{
         LegacyProbe, classify_legacy_probe, is_strict_legacy_comparison,
         legacy_empty_proves_mismatch, legacy_seed_scan_count, requires_strict_legacy_fixture,
+        validate_min_ratio,
     };
 
     type HModule = *mut c_void;
@@ -295,6 +315,11 @@ mod windows_harness {
         free_result: FreeResult,
     }
 
+    struct DllRun {
+        result: Option<String>,
+        elapsed: Duration,
+    }
+
     enum DllEntry {
         Current(BrainstormSearch),
         Original(OriginalBrainstorm),
@@ -335,7 +360,7 @@ mod windows_harness {
             })
         }
 
-        fn run(&self, case: &Case) -> Result<Option<String>, String> {
+        fn run(&self, case: &Case) -> Result<DllRun, String> {
             match self.entry {
                 DllEntry::Current(search) => self.run_current(case, search),
                 DllEntry::Original(search) => self.run_original(case, search),
@@ -394,11 +419,7 @@ mod windows_harness {
             })
         }
 
-        fn run_current(
-            &self,
-            case: &Case,
-            search: BrainstormSearch,
-        ) -> Result<Option<String>, String> {
+        fn run_current(&self, case: &Case, search: BrainstormSearch) -> Result<DllRun, String> {
             let seed_start = CArg::new(case.seed_start)?;
             let voucher = CArg::new(case.voucher)?;
             let pack = CArg::new(case.pack)?;
@@ -408,6 +429,7 @@ mod windows_harness {
             let joker_location = CArg::new(case.joker_location)?;
             let deck = CArg::new(case.deck)?;
 
+            let started = Instant::now();
             let result = unsafe {
                 (search)(
                     seed_start.as_ptr(),
@@ -429,29 +451,29 @@ mod windows_harness {
                     case.threads,
                 )
             };
-            if result.is_null() {
-                return Ok(None);
-            }
-            let out = unsafe { CStr::from_ptr(result) }
-                .to_string_lossy()
-                .into_owned();
-            unsafe {
-                (self.free_result)(result);
-            }
-            Ok(Some(out))
+            let result = if result.is_null() {
+                None
+            } else {
+                let out = unsafe { CStr::from_ptr(result) }
+                    .to_string_lossy()
+                    .into_owned();
+                unsafe {
+                    (self.free_result)(result);
+                }
+                Some(out)
+            };
+            let elapsed = started.elapsed();
+            Ok(DllRun { result, elapsed })
         }
 
-        fn run_original(
-            &self,
-            case: &Case,
-            search: OriginalBrainstorm,
-        ) -> Result<Option<String>, String> {
+        fn run_original(&self, case: &Case, search: OriginalBrainstorm) -> Result<DllRun, String> {
             let seed_start = CArg::new(Some(case.seed_start.unwrap_or("")))?;
             let voucher = CArg::new(Some(original_voucher_name(case.voucher.unwrap_or(""))?))?;
             let pack = CArg::new(Some(original_pack_name(case.pack.unwrap_or(""))?))?;
             let tag = CArg::new(Some(original_tag_name(case.tag1.unwrap_or(""))?))?;
 
             let _silencer = StdoutSilencer::start();
+            let started = Instant::now();
             let result = unsafe {
                 (search)(
                     seed_start.as_ptr(),
@@ -463,16 +485,19 @@ mod windows_harness {
                     case.perkeo,
                 )
             };
-            if result.is_null() {
-                return Ok(None);
-            }
-            let out = unsafe { CStr::from_ptr(result) }
-                .to_string_lossy()
-                .into_owned();
-            unsafe {
-                (self.free_result)(result.cast_mut());
-            }
-            Ok(Some(out))
+            let result = if result.is_null() {
+                None
+            } else {
+                let out = unsafe { CStr::from_ptr(result) }
+                    .to_string_lossy()
+                    .into_owned();
+                unsafe {
+                    (self.free_result)(result.cast_mut());
+                }
+                Some(out)
+            };
+            let elapsed = started.elapsed();
+            Ok(DllRun { result, elapsed })
         }
     }
 
@@ -783,9 +808,7 @@ mod windows_harness {
         if settings.repeat == 0 {
             return Err("--repeat must be positive".to_owned());
         }
-        if min_ratio < 0.0 {
-            return Err("--min-ratio cannot be negative".to_owned());
-        }
+        validate_min_ratio(min_ratio)?;
         let rust = Dll::load(rust_path)?;
         let original = Dll::load_original(original_path)?;
         let cases =
@@ -803,7 +826,7 @@ mod windows_harness {
         let mut failed = false;
         let mut comparisons = Vec::with_capacity(cases.len());
         for case in &cases {
-            let rust_probe = rust.run(case)?;
+            let rust_probe = rust.run(case)?.result;
             let rust_probe_scanned = rust.measured_scanned_count(case, rust_probe.as_deref())?;
             let rust_probe_result = display_result(rust_probe.as_deref()).to_owned();
             let rust_summary = measure_bench_case(
@@ -826,7 +849,7 @@ mod windows_harness {
             {
                 (None, Some(reason))
             } else {
-                let probe_result = original.run(case)?;
+                let probe_result = original.run(case)?.result;
                 match classify_legacy_probe(case.seed_start.unwrap_or(""), probe_result.as_deref())?
                 {
                     LegacyProbe::EmptyResult => {
@@ -997,10 +1020,7 @@ mod windows_harness {
         run_warmups(dll, case, warmup)?;
         let mut runs: Vec<BenchRun> = Vec::with_capacity(repeat);
         for run in 1..=repeat {
-            let started = Instant::now();
-            let result = dll.run(case);
-            let elapsed = started.elapsed();
-            let result = result?;
+            let DllRun { result, elapsed } = dll.run(case)?;
             if case.compiled_no_match && result.is_some() {
                 return Err(format!(
                     "{} compiled to NoMatch but {implementation} returned a seed",

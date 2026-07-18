@@ -21,7 +21,7 @@ pub use seed::{SEED_SPACE, Seed};
 mod tests {
     #![allow(clippy::expect_used, unsafe_code)]
 
-    use std::ffi::{CStr, CString};
+    use std::ffi::CStr;
 
     use super::*;
     use crate::engine::config::CompiledFilter;
@@ -32,12 +32,12 @@ mod tests {
         STANDARD_JOKER_POOLS, TAG_POOL, VOUCHER_POOL, is_ante1_locked_tag,
         is_first_shop_possible_joker, target_joker_pools,
     };
-    use crate::ffi::{brainstorm_search, free_result, immolate_last_error};
+    use crate::ffi::{brainstorm_search, free_result};
     use crate::filters::FilterConfig;
     use crate::instance::Instance;
     use crate::item::{
-        COMMON_JOKERS, COMMON_JOKERS_100, Item, LEGENDARY_JOKERS, RARE_JOKERS, RARE_JOKERS_100,
-        UNCOMMON_JOKERS, UNCOMMON_JOKERS_100, item_to_string,
+        COMMON_JOKERS, COMMON_JOKERS_100, ITEM_COUNT, Item, LEGENDARY_JOKERS, RARE_JOKERS,
+        RARE_JOKERS_100, UNCOMMON_JOKERS, UNCOMMON_JOKERS_100, item_to_string, string_to_item,
     };
     use crate::rng::{LuaRandom, fract, pseudohash_from, pseudostep, round13};
     use crate::search::resolve_seed_budget;
@@ -97,13 +97,47 @@ mod tests {
     }
 
     #[test]
-    fn no_filter_returns_start_seed_after_first_candidate() {
-        let cfg = FilterConfig::default();
-        assert_eq!(brainstorm_search_core("", &cfg, 1, 1).as_deref(), Some(""),);
-        assert_eq!(
-            brainstorm_search_core("1", &cfg, 1, 1).as_deref(),
-            Some("1"),
+    fn no_filter_shapes_preserve_canonical_start_for_every_scheduler_input() {
+        use crate::engine::config::KernelShape;
+
+        let forced_buffoon = raw_cfg(
+            "",
+            "p_buffoon_normal_1",
+            "",
+            "",
+            "",
+            "any",
+            0.0,
+            false,
+            false,
+            "b_red",
+            false,
+            false,
+            0,
+            0.0,
         );
+        for cfg in [FilterConfig::default(), forced_buffoon] {
+            assert_eq!(CompiledFilter::compile(&cfg).shape, KernelShape::NoFilter);
+            for (start, canonical) in [
+                ("", ""),
+                ("1", "1"),
+                ("?", ""),
+                ("1?Z", "1Z"),
+                ("123456789ABC", "12345678"),
+                ("é1234567", "123456"),
+                ("ZZZZZZZZ", "ZZZZZZZZ"),
+            ] {
+                for budget in [-1, 0, 1, SEED_SPACE + 1] {
+                    for threads in [i32::MIN, -1, 0, 1, 2, 16, i32::MAX] {
+                        assert_eq!(
+                            brainstorm_search_core(start, &cfg, budget, threads).as_deref(),
+                            Some(canonical),
+                            "start={start:?} budget={budget} threads={threads}",
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -148,6 +182,41 @@ mod tests {
             .joker,
             Item::Seance
         );
+    }
+
+    #[test]
+    fn pack_keys_accept_numeric_instance_suffixes() {
+        for (key, expected) in [
+            ("p_arcana_normal", Item::Arcana_Pack),
+            ("p_arcana_normal_1", Item::Arcana_Pack),
+            ("p_arcana_normal_42", Item::Arcana_Pack),
+            ("p_arcana_normal_", Item::RETRY),
+            ("p_arcana_normal_1x", Item::RETRY),
+            ("p_arcana_normal_1_2", Item::RETRY),
+        ] {
+            assert_eq!(
+                FilterConfig::from_raw(
+                    "", key, "", "", "", "any", 0.0, false, false, "b_red", false, false, 0, 0.0,
+                )
+                .pack,
+                expected,
+                "pack key {key:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn item_layout_preserves_catalog_discriminants() {
+        assert_eq!(std::mem::size_of::<Item>(), std::mem::size_of::<u16>());
+        assert_eq!(Item::Seance.idx(), 85);
+        assert_eq!(ITEM_COUNT, 507);
+    }
+
+    #[test]
+    fn seance_mapping_matches_the_runtime_catalog_name() {
+        assert_eq!(item_to_string(Item::Seance), "Seance");
+        assert_eq!(string_to_item("Seance"), Item::Seance);
+        assert_eq!(string_to_item("S\u{398}ance"), Item::RETRY);
     }
 
     #[test]
@@ -446,6 +515,77 @@ mod tests {
             brainstorm_search_core("", &cfg, 100_000, 1).as_deref(),
             Some("P1111111"),
         );
+    }
+
+    #[test]
+    fn forced_normal_buffoon_is_nonselective_across_specialized_shapes() {
+        use crate::engine::config::KernelShape;
+        use crate::filters::JokerLocation;
+
+        let forced_buffoon = FilterConfig {
+            pack: Item::Buffoon_Pack,
+            ..FilterConfig::default()
+        };
+
+        let cases = [
+            (
+                "tag + forced Buffoon",
+                "21111111",
+                FilterConfig {
+                    tag1: Item::Charm_Tag,
+                    ..forced_buffoon
+                },
+                KernelShape::TagOnly,
+            ),
+            (
+                "Observatory + forced Buffoon",
+                "S111111",
+                FilterConfig {
+                    observatory: true,
+                    ..forced_buffoon
+                },
+                KernelShape::Observatory,
+            ),
+            (
+                "tag + Observatory + forced Buffoon",
+                "U8411111",
+                FilterConfig {
+                    tag1: Item::Charm_Tag,
+                    observatory: true,
+                    ..forced_buffoon
+                },
+                KernelShape::TagObservatory,
+            ),
+            (
+                "shop Joker + forced Buffoon",
+                "Q2111111",
+                FilterConfig {
+                    joker: Item::Burnt_Joker,
+                    joker_location: JokerLocation::Shop,
+                    ..forced_buffoon
+                },
+                KernelShape::ShopJoker,
+            ),
+            (
+                "Erratic + forced Buffoon",
+                "11",
+                FilterConfig {
+                    deck: Item::Erratic_Deck,
+                    erratic: true,
+                    min_face_cards: 12,
+                    ..forced_buffoon
+                },
+                KernelShape::Erratic,
+            ),
+        ];
+
+        for (name, target, cfg, shape) in cases {
+            assert_eq!(CompiledFilter::compile(&cfg).shape, shape, "{name}");
+            assert_seed_passes_like_source(name, target, &cfg);
+            for seed_start in ["", "KRVH1234", "ZZZYZZZZ"] {
+                assert_predicate_matches_source_oracle_window(name, seed_start, &cfg, 256);
+            }
+        }
     }
 
     #[test]
@@ -1304,20 +1444,8 @@ mod tests {
             .filter(|case| case.group == crate::bench_cases::BenchGroup::Ux)
         {
             let cfg = filter_config_from_benchmark(&case);
-            let compiled = CompiledFilter::compile(&cfg);
             for seed_start in ["", "KRVH1234", "ZZZYZZZZ"] {
-                let mut state = SearchState::from_id(Seed::from(seed_start).id());
-                for offset in 0..256 {
-                    let mut instance = Instance::new(state.seed.clone());
-                    let expected = crate::filters::apply_filters(&mut instance, &cfg);
-                    let actual = apply_compiled_filter(&mut state, &compiled);
-                    assert_eq!(
-                        actual, expected,
-                        "{} diverged from the source model at {} + {offset}",
-                        case.name, seed_start,
-                    );
-                    state.next();
-                }
+                assert_predicate_matches_source_oracle_window(case.name, seed_start, &cfg, 256);
             }
         }
     }
@@ -1768,59 +1896,67 @@ mod tests {
 
     #[test]
     fn ffi_contract_matches_empty_and_allocated_results() {
-        let empty = CString::new("").expect("literal has no interior nul");
-        let one = CString::new("1").expect("literal has no interior nul");
+        let empty = c"";
+        let one = c"1";
 
-        let empty_result = brainstorm_search(
-            empty.as_ptr(),
-            empty.as_ptr(),
-            empty.as_ptr(),
-            empty.as_ptr(),
-            empty.as_ptr(),
-            empty.as_ptr(),
-            empty.as_ptr(),
-            0.0,
-            false,
-            false,
-            empty.as_ptr(),
-            false,
-            false,
-            0,
-            0.0,
-            1,
-            1,
-        );
+        // SAFETY: every pointer references a static, immutable C string.
+        let empty_result = unsafe {
+            brainstorm_search(
+                empty.as_ptr(),
+                empty.as_ptr(),
+                empty.as_ptr(),
+                empty.as_ptr(),
+                empty.as_ptr(),
+                empty.as_ptr(),
+                empty.as_ptr(),
+                0.0,
+                false,
+                false,
+                empty.as_ptr(),
+                false,
+                false,
+                0,
+                0.0,
+                1,
+                1,
+            )
+        };
         assert!(empty_result.is_null());
-        assert!(immolate_last_error().is_null());
 
-        let one_result = brainstorm_search(
-            one.as_ptr(),
-            empty.as_ptr(),
-            empty.as_ptr(),
-            empty.as_ptr(),
-            empty.as_ptr(),
-            empty.as_ptr(),
-            empty.as_ptr(),
-            0.0,
-            false,
-            false,
-            empty.as_ptr(),
-            false,
-            false,
-            0,
-            0.0,
-            1,
-            1,
-        );
+        // SAFETY: every pointer references a static, immutable C string.
+        let one_result = unsafe {
+            brainstorm_search(
+                one.as_ptr(),
+                empty.as_ptr(),
+                empty.as_ptr(),
+                empty.as_ptr(),
+                empty.as_ptr(),
+                empty.as_ptr(),
+                empty.as_ptr(),
+                0.0,
+                false,
+                false,
+                empty.as_ptr(),
+                false,
+                false,
+                0,
+                0.0,
+                1,
+                1,
+            )
+        };
         assert!(!one_result.is_null());
         // SAFETY: `brainstorm_search` returned this pointer and it is non-null.
         let result = unsafe { CStr::from_ptr(one_result) }
             .to_string_lossy()
             .into_owned();
         assert_eq!(result, "1");
-        free_result(one_result);
-        free_result(std::ptr::null_mut());
-        assert!(immolate_last_error().is_null());
+        // SAFETY: the first pointer was returned above and has not been freed;
+        // null is explicitly supported by `free_result`.
+        unsafe {
+            free_result(one_result);
+            free_result(std::ptr::null_mut());
+        }
     }
 
     #[allow(clippy::fn_params_excessive_bools, clippy::too_many_arguments)]
@@ -1877,6 +2013,26 @@ mod tests {
                 Some(seed),
                 "{name}: search rejected target seed {seed} with {threads} threads",
             );
+        }
+    }
+
+    fn assert_predicate_matches_source_oracle_window(
+        name: &str,
+        seed_start: &str,
+        cfg: &FilterConfig,
+        count: usize,
+    ) {
+        let compiled = CompiledFilter::compile(cfg);
+        let mut state = SearchState::from_id(Seed::from(seed_start).id());
+        for offset in 0..count {
+            let mut instance = Instance::new(state.seed.clone());
+            let expected = crate::filters::apply_filters(&mut instance, cfg);
+            let actual = apply_compiled_filter(&mut state, &compiled);
+            assert_eq!(
+                actual, expected,
+                "{name} diverged from the source model at {seed_start} + {offset}",
+            );
+            state.next();
         }
     }
 
