@@ -165,7 +165,7 @@ rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
 rust_dll="$IMMO_DIR/target/$rust_target/release/immolate.dll"
 rust_artifact_dir="$TARGET_DIR/rust"
 
-echo "Building Rust $DLL"
+echo "Building Rust $DLL" >&2
 if ! rustup target list --installed | grep -qx "$rust_target"; then
   echo "Rust target $rust_target not installed. Run: rustup target add $rust_target"
   exit 1
@@ -182,7 +182,7 @@ shell = "bash -c"
 run = '''
 set -euo pipefail
 rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
-echo "Building Rust DLL harness"
+echo "Building Rust DLL harness" >&2
 if ! rustup target list --installed | grep -qx "$rust_target"; then
   echo "Rust target $rust_target not installed. Run: rustup target add $rust_target"
   exit 1
