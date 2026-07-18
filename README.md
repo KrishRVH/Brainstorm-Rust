@@ -1,6 +1,6 @@
 # Brainstorm Supercharged for Balatro
 
-Current release: **v3.4**.
+Current release: **v3.5**.
 
 **Just want to install it?** Open this repository's **Releases** page, select
 the release marked **Latest**, download the Brainstorm Supercharged zip, and
