@@ -49,11 +49,12 @@ BENCH_BASELINE_DLL=/path/to/frozen/Immolate.dll \
 
 This is the strict native-Windows performance-regression command. It freezes
 input DLLs before building, stages all three artifacts on the Windows-local
-temporary filesystem, records settings and pre-run hashes, runs alternating
-`A/B/B/A` and `B/A/A/B` cycles, and rejects any mid-run artifact change. Every
-result and scanned count must match. It gates p50, p95, p99, and mean latency on
-stable majority-cycle losses or concordant paired-cycle median and pooled
-losses over both the configured ratio and absolute noise floor.
+temporary filesystem with equal DLL basenames and path lengths, records
+settings and pre-run hashes, runs alternating `A/B/B/A` and `B/A/A/B` cycles,
+and rejects any mid-run artifact change. Every result and scanned count must
+match. It retains the per-cycle ratios and deltas, and gates p50, p95, p99, and
+mean latency on stable majority-cycle losses or concordant paired-cycle median
+and pooled losses over both the configured ratio and absolute noise floor.
 
 The defaults are four cycles and 31 repeats. Treat any tail `watch` row as a
 prompt for a targeted confirmation with at least

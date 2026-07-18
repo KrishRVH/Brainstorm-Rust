@@ -97,9 +97,12 @@ def prepared_execution(
     stage_root = native_temp_root(args.native_stage_dir)
     with tempfile.TemporaryDirectory(prefix="brainstorm-current-", dir=stage_root) as name:
         stage = Path(name)
+        # Equal basenames and path lengths avoid making DLL location an A/B confound.
+        (stage / "A").mkdir()
+        (stage / "B").mkdir()
         staged_paths = {
-            "baseline": stage / "baseline.dll",
-            "candidate": stage / "candidate.dll",
+            "baseline": stage / "A" / "Immolate.dll",
+            "candidate": stage / "B" / "Immolate.dll",
             "harness": stage / "harness.exe",
         }
         for label, destination in staged_paths.items():
@@ -246,8 +249,10 @@ def analyze_samples(samples, args):
             ]
             baseline_ms = statistics.median(value[0] for value in cycle_values)
             candidate_ms = statistics.median(value[1] for value in cycle_values)
-            paired_ratio = statistics.median(ratio(a, b) for a, b in cycle_values)
-            paired_delta = statistics.median(b - a for a, b in cycle_values)
+            cycle_ratios = [ratio(a, b) for a, b in cycle_values]
+            cycle_deltas = [b - a for a, b in cycle_values]
+            paired_ratio = statistics.median(cycle_ratios)
+            paired_delta = statistics.median(cycle_deltas)
             pooled_a = metric_value(
                 [value for cycle in by_cycle.values() for value in cycle["A"]], metric
             )
@@ -283,6 +288,8 @@ def analyze_samples(samples, args):
                 "pooled_ratio": ratio(pooled_a, pooled_b),
                 "pooled_delta_ms": pooled_b - pooled_a,
                 "regression_cycles": regression_cycles,
+                "cycle_ratios": cycle_ratios,
+                "cycle_deltas_ms": cycle_deltas,
                 "status": "regression" if failed else "watch" if watch else "ok",
             })
     return rows, failures
@@ -333,7 +340,7 @@ def compare(args: argparse.Namespace) -> int:
     print(
         "case\tmetric\tscanned\tresult\tbaseline_median_ms\t"
         "candidate_median_ms\tpaired_ratio\tpaired_delta_ms\tpooled_ratio\t"
-        "pooled_delta_ms\tregression_cycles\tstatus"
+        "pooled_delta_ms\tregression_cycles\tcycle_ratios\tcycle_deltas_ms\tstatus"
     )
     for row in rows:
         print(
@@ -341,7 +348,10 @@ def compare(args: argparse.Namespace) -> int:
             f"{row['baseline_ms']:.3f}\t{row['candidate_ms']:.3f}\t"
             f"{row['paired_ratio']:.3f}\t{row['paired_delta_ms']:.3f}\t"
             f"{row['pooled_ratio']:.3f}\t{row['pooled_delta_ms']:.3f}\t"
-            f"{row['regression_cycles']}/{args.cycles}\t{row['status']}"
+            f"{row['regression_cycles']}/{args.cycles}\t"
+            f"{','.join(f'{value:.6f}' for value in row['cycle_ratios'])}\t"
+            f"{','.join(f'{value:.6f}' for value in row['cycle_deltas_ms'])}\t"
+            f"{row['status']}"
         )
     return 1 if failures else 0
 
@@ -389,6 +399,8 @@ def self_test() -> None:
     assert calls == list("ABBABAAB")
     rows, failures = analyze_samples(samples, args)
     assert len(rows) == 4 and len(failures) == 4
+    assert all(len(row["cycle_ratios"]) == 2 for row in rows)
+    assert all(len(row["cycle_deltas_ms"]) == 2 for row in rows)
 
     mismatched = {key: list(value) for key, value in samples.items()}
     mismatched[("synthetic", 1, "B")][0] = (10, "DIFFERENT", 1.02)
