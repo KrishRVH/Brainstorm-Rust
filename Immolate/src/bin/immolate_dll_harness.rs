@@ -1307,7 +1307,7 @@ mod windows_harness {
 
     fn seed_scan_count(case: &Case, result: &str) -> i64 {
         let start = case.seed_start.unwrap_or("");
-        (Seed::from_str(result).id() - Seed::from_str(start).id()).rem_euclid(SEED_SPACE) + 1
+        (Seed::from(result).id() - Seed::from(start).id()).rem_euclid(SEED_SPACE) + 1
     }
 
     fn original_skip_reason(case: &Case) -> Option<&'static str> {

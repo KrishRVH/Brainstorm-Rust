@@ -110,7 +110,7 @@ then runs `mise run doctor` to check the system dependencies.
   `rustup target add x86_64-pc-windows-gnu`
 - MinGW-w64 for Windows target linking and DLL inspection.
 - Wine for running the Windows DLL harness.
-- Python 3 for the current/current regression gate.
+- `sha256sum` for benchmark artifact integrity checks.
 - WSL interoperability (`wslpath` and `cmd.exe`) for native-Windows timing.
 
 Wine may print a `wine32 is missing` warning on Linux. That warning is not a

@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn erratic_cursor_matches_scalar_draws_across_its_lifecycle() {
         fn seed_and_hash(value: &str) -> (Seed, f64) {
-            let mut seed = Seed::from_str(value);
+            let mut seed = Seed::from(value);
             let hash = seed.pseudohash(0);
             (seed, hash)
         }

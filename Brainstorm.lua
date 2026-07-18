@@ -13,8 +13,6 @@ Brainstorm = _G.Brainstorm
 
 Brainstorm.VERSION = Brainstorm.VERSION or "Brainstorm Supercharged"
 
--- Steamodded compatibility reserves Brainstorm.SMODS for reload-time state.
-
 Brainstorm.SPF_KEYS = {
   "1000",
   "2500",
@@ -42,7 +40,6 @@ Brainstorm.SPF_LIST = {
 }
 
 Brainstorm.DEFAULT_SPF_KEY = "100000"
-Brainstorm.DEFAULT_SPF_ID = 7
 
 local DEFAULT_CONFIG = {
   enable = true,
@@ -55,30 +52,21 @@ local DEFAULT_CONFIG = {
     load_state = "x",
   },
   ar_filters = {
-    pack = {},
-    pack_id = 1,
+    pack = "",
     voucher_name = "",
-    voucher_id = 1,
     tag_name = "",
-    tag_id = 1,
     tag2_name = "",
-    tag2_id = 1,
     joker_name = "",
     joker_search = "",
-    joker_id = 1,
     joker_location = "any",
-    joker_location_id = 1,
     soul_skip = 0,
     inst_observatory = false,
     inst_perkeo = false,
   },
   ar_prefs = {
-    spf_id = 7,
     spf_int = 100000,
     face_count = 0,
-    suit_ratio_id = 1,
     suit_ratio_percent = "Disabled",
-    suit_ratio_decimal = 0,
   },
 }
 
@@ -99,9 +87,7 @@ end
 
 Brainstorm.config = Brainstorm.config or Brainstorm.default_config()
 
-Brainstorm.ar_text = Brainstorm.ar_text or nil
 Brainstorm.ar_active = Brainstorm.ar_active or false
-Brainstorm.ar_last_error = Brainstorm.ar_last_error or nil
 Brainstorm.ar_seeds_scanned = Brainstorm.ar_seeds_scanned or 0
 Brainstorm.ar_status_text = Brainstorm.ar_status_text or "Rerolling..."
 Brainstorm.ar_status_last_update = Brainstorm.ar_status_last_update or 0
@@ -120,7 +106,6 @@ Brainstorm.RATIO_MAP = {
 
 Brainstorm.AR_STATUS_INTERVAL = 0.15
 
-local string_lower = string.lower
 local pcall = pcall
 local get_time = love and love.timer and love.timer.getTime
 
@@ -240,29 +225,14 @@ local function assign_table(target, source)
   end
 end
 
-local function option_index_for_value(options, value)
-  for i, option in ipairs(options) do
-    if option == value then
-      return i
-    end
-  end
-  return 1
-end
-
 local function normalize_spf(prefs)
-  local spf_id =
-    clamp_int(prefs.spf_id, Brainstorm.DEFAULT_SPF_ID, 1, #Brainstorm.SPF_KEYS)
   local spf_int = math.floor(as_number(prefs.spf_int, 0))
   local spf_key = tostring(spf_int)
   if Brainstorm.SPF_LIST[spf_key] then
     prefs.spf_int = Brainstorm.SPF_LIST[spf_key]
-    prefs.spf_id = option_index_for_value(Brainstorm.SPF_KEYS, spf_key)
     return
   end
-  local selected_key = Brainstorm.SPF_KEYS[spf_id] or Brainstorm.DEFAULT_SPF_KEY
-  prefs.spf_id = option_index_for_value(Brainstorm.SPF_KEYS, selected_key)
-  prefs.spf_int = Brainstorm.SPF_LIST[selected_key]
-    or Brainstorm.SPF_LIST[Brainstorm.DEFAULT_SPF_KEY]
+  prefs.spf_int = Brainstorm.SPF_LIST[Brainstorm.DEFAULT_SPF_KEY]
 end
 
 local function merge_string(target, source, key)
@@ -299,21 +269,13 @@ function Brainstorm.normalize_config(source)
 
   local filters = source.ar_filters
   if type(filters) == "table" then
-    if type(filters.pack) == "table" or type(filters.pack) == "string" then
-      normalized.ar_filters.pack = clone_table(filters.pack)
-    end
-    merge_int(normalized.ar_filters, filters, "pack_id", 1)
+    merge_string(normalized.ar_filters, filters, "pack")
     merge_string(normalized.ar_filters, filters, "voucher_name")
-    merge_int(normalized.ar_filters, filters, "voucher_id", 1)
     merge_string(normalized.ar_filters, filters, "tag_name")
-    merge_int(normalized.ar_filters, filters, "tag_id", 1)
     merge_string(normalized.ar_filters, filters, "tag2_name")
-    merge_int(normalized.ar_filters, filters, "tag2_id", 1)
     merge_string(normalized.ar_filters, filters, "joker_name")
     merge_string(normalized.ar_filters, filters, "joker_search")
-    merge_int(normalized.ar_filters, filters, "joker_id", 1)
     merge_string(normalized.ar_filters, filters, "joker_location")
-    merge_int(normalized.ar_filters, filters, "joker_location_id", 1)
     merge_int(normalized.ar_filters, filters, "soul_skip", 0, 5)
     merge_bool(normalized.ar_filters, filters, "inst_observatory")
     merge_bool(normalized.ar_filters, filters, "inst_perkeo")
@@ -327,12 +289,8 @@ function Brainstorm.normalize_config(source)
 
   local prefs = source.ar_prefs
   if type(prefs) == "table" then
-    merge_int(normalized.ar_prefs, prefs, "spf_id", 1, #Brainstorm.SPF_KEYS)
-    if prefs.spf_int ~= nil then
-      normalized.ar_prefs.spf_int = prefs.spf_int
-    end
+    merge_int(normalized.ar_prefs, prefs, "spf_int", 1)
     merge_int(normalized.ar_prefs, prefs, "face_count", 0, 35)
-    merge_int(normalized.ar_prefs, prefs, "suit_ratio_id", 1)
     merge_string(normalized.ar_prefs, prefs, "suit_ratio_percent")
   end
   normalize_spf(normalized.ar_prefs)
@@ -340,8 +298,6 @@ function Brainstorm.normalize_config(source)
   if not Brainstorm.RATIO_MAP[normalized.ar_prefs.suit_ratio_percent] then
     normalized.ar_prefs.suit_ratio_percent = "Disabled"
   end
-  normalized.ar_prefs.suit_ratio_decimal = Brainstorm.RATIO_MAP[normalized.ar_prefs.suit_ratio_percent]
-    or 0
 
   return normalized
 end
@@ -455,12 +411,8 @@ function Brainstorm.config_path()
   return nil
 end
 
-local function legacy_config_path()
-  if not Brainstorm.PATH then
-    return nil
-  end
-  return Brainstorm.PATH .. "/" .. CONFIG_FILE_NAME
-end
+local create_status_text
+local remove_status_text
 
 local function show_auto_reroll_text()
   if Brainstorm.ar_text then
@@ -473,14 +425,7 @@ local function show_auto_reroll_text()
   if not Brainstorm.ar_status_text or Brainstorm.ar_status_text == "" then
     update_auto_reroll_status(true)
   end
-  Brainstorm.ar_text = Brainstorm.attention_text({
-    scale = 1.4,
-    ref_table = Brainstorm,
-    ref_value = "ar_status_text",
-    align = "cm",
-    offset = { x = 0, y = -3.5 },
-    major = major,
-  })
+  Brainstorm.ar_text = create_status_text(major)
 end
 
 local function report_auto_reroll_error(message)
@@ -499,21 +444,6 @@ local function find_brainstorm_directory(directory)
   if directory_exists(exact_path) and has_mod_markers(exact_path) then
     return exact_path
   end
-
-  local success, items = pcall(nfs.getDirectoryItems, directory)
-  if not success or type(items) ~= "table" then
-    return nil
-  end
-  table.sort(items)
-  for _, item in ipairs(items) do
-    local item_path = directory .. "/" .. item
-    if directory_exists(item_path) then
-      local item_name = string_lower(item)
-      if item_name == "brainstorm" and has_mod_markers(item_path) then
-        return item_path
-      end
-    end
-  end
   return nil
 end
 
@@ -523,13 +453,6 @@ function Brainstorm.load_config()
       and file_exists(config_path)
       and nfs.read(config_path)
     or nil
-  local migrated = false
-
-  local legacy_path = legacy_config_path()
-  if not config_file and legacy_path and legacy_path ~= config_path then
-    config_file = file_exists(legacy_path) and nfs.read(legacy_path) or nil
-    migrated = config_file ~= nil
-  end
 
   if not config_file then
     assign_table(
@@ -550,9 +473,6 @@ function Brainstorm.load_config()
         Brainstorm.normalize_config(Brainstorm.config)
       )
     end
-    if migrated then
-      Brainstorm.write_config()
-    end
   end
 end
 
@@ -563,10 +483,7 @@ function Brainstorm.write_config()
   end
   local success, packed = pcall(STR_PACK, Brainstorm.config)
   if success and packed then
-    local write_success = nfs.write(config_path, packed)
-    if not write_success then
-      return
-    end
+    nfs.write(config_path, packed)
   end
 end
 
@@ -871,7 +788,7 @@ function Brainstorm.stop_auto_reroll()
   if Brainstorm.ar_text then
     Brainstorm.ar_text.cancelled = true
     if Brainstorm.ar_text.AT and not Brainstorm.ar_text.removing then
-      Brainstorm.remove_attention_text(Brainstorm.ar_text)
+      remove_status_text(Brainstorm.ar_text)
     end
     Brainstorm.ar_text = nil
   end
@@ -896,30 +813,9 @@ function Brainstorm.auto_reroll()
     return false, "Auto-reroll stopped (Immolate.dll missing)"
   end
 
-  local pack_key = ""
-  local pack_filter = Brainstorm.config.ar_filters.pack
-  if type(pack_filter) == "table" and #pack_filter > 0 then
-    pack_key = pack_filter[1]
-  elseif type(pack_filter) == "string" then
-    pack_key = pack_filter
-  end
-
-  local deck_key = ""
-  if G.GAME then
-    local back_key = G.GAME.selected_back_key
-    if type(back_key) == "string" then
-      deck_key = back_key
-    elseif type(back_key) == "table" and type(back_key.key) == "string" then
-      deck_key = back_key.key
-    elseif
-      G.GAME.selected_back
-      and G.GAME.selected_back.effect
-      and G.GAME.selected_back.effect.center
-      and type(G.GAME.selected_back.effect.center.key) == "string"
-    then
-      deck_key = G.GAME.selected_back.effect.center.key
-    end
-  end
+  local pack_key = as_string(Brainstorm.config.ar_filters.pack)
+  local selected_back = G.GAME and G.GAME.selected_back_key
+  local deck_key = selected_back and as_string(selected_back.key) or ""
 
   local erratic = G.GAME
       and G.GAME.starting_params
@@ -931,7 +827,8 @@ function Brainstorm.auto_reroll()
     or false
 
   local min_face_cards = as_int(Brainstorm.config.ar_prefs.face_count, 0)
-  local suit_ratio = as_number(Brainstorm.config.ar_prefs.suit_ratio_decimal, 0)
+  local suit_ratio = Brainstorm.RATIO_MAP[Brainstorm.config.ar_prefs.suit_ratio_percent]
+    or 0
   local seed_budget = current_seed_budget()
   if not seed_budget then
     return false, "Auto-reroll stopped (invalid seed budget)"
@@ -941,7 +838,7 @@ function Brainstorm.auto_reroll()
     immolate.brainstorm_search,
     seed_start,
     as_string(Brainstorm.config.ar_filters.voucher_name),
-    as_string(pack_key),
+    pack_key,
     as_string(Brainstorm.config.ar_filters.tag_name),
     as_string(Brainstorm.config.ar_filters.tag2_name),
     as_string(Brainstorm.config.ar_filters.joker_name),
@@ -949,7 +846,7 @@ function Brainstorm.auto_reroll()
     as_number(Brainstorm.config.ar_filters.soul_skip, 0),
     as_bool(Brainstorm.config.ar_filters.inst_observatory),
     as_bool(Brainstorm.config.ar_filters.inst_perkeo),
-    as_string(deck_key),
+    deck_key,
     as_bool(erratic),
     as_bool(no_faces),
     min_face_cards,
@@ -1008,176 +905,101 @@ if not Brainstorm._hooks.round_scores_row then
   end
 end
 
-function Brainstorm.attention_text(args)
-  args = args or {}
-  if not (G and G.C and copy_table) then
-    args.cancelled = true
-    return args
+create_status_text = function(major)
+  if not (can_create_uibox(major) and G.C and copy_table) then
+    return nil
   end
-  args.text = args.text or "test"
-  args.scale = args.scale or 1
-  args.colour = copy_table(args.colour or G.C.WHITE)
-  args.hold = (args.hold or 0) + 0.1 * (G.SPEEDFACTOR or 1)
-  args.pos = args.pos or { x = 0, y = 0 }
-  args.align = args.align or "cm"
-  args.emboss = args.emboss or nil
-
-  args.fade = 1
-  local major = args.cover or args.major or attention_anchor()
-  if not can_create_uibox(major) then
-    args.cancelled = true
-    return args
-  end
-
-  if args.cover then
-    args.cover_colour = copy_table(args.cover_colour or G.C.RED)
-    args.cover_colour_l = copy_table(lighten(args.cover_colour, 0.2))
-    args.cover_colour_d = copy_table(darken(args.cover_colour, 0.2))
-  else
-    args.cover_colour = copy_table(G.C.CLEAR)
-  end
-
-  args.uibox_config = {
-    align = args.align,
-    offset = args.offset or { x = 0, y = 0 },
-    major = major,
+  local status = {
+    colour = copy_table(G.C.WHITE),
+    fade = 1,
   }
-
   G.E_MANAGER:add_event(Event({
     trigger = "after",
     delay = 0,
     blockable = false,
     blocking = false,
     func = function()
-      if args.cancelled or not can_create_uibox(major) then
+      if status.cancelled or not can_create_uibox(major) then
         return true
       end
-      args.AT = UIBox({
-        T = { args.pos.x, args.pos.y, 0, 0 },
+      status.AT = UIBox({
+        T = { 0, 0, 0, 0 },
         definition = {
           n = G.UIT.ROOT,
           config = {
-            align = args.cover_align or "cm",
-            minw = (args.cover and args.cover.T.w or 0.001)
-              + (args.cover_padding or 0),
-            minh = (args.cover and args.cover.T.h or 0.001)
-              + (args.cover_padding or 0),
+            align = "cm",
+            minw = 0.001,
+            minh = 0.001,
             padding = 0.03,
             r = 0.1,
-            emboss = args.emboss,
-            colour = args.cover_colour,
+            colour = copy_table(G.C.CLEAR),
           },
           nodes = {
             {
               n = G.UIT.T,
               config = {
                 draw_layer = 1,
-                text = args.text,
-                ref_table = args.ref_table,
-                ref_value = args.ref_value,
-                scale = args.scale,
-                colour = args.colour,
+                ref_table = Brainstorm,
+                ref_value = "ar_status_text",
+                scale = 1.4,
+                colour = status.colour,
                 shadow = true,
               },
             },
           },
         },
-        config = args.uibox_config,
+        config = {
+          align = "cm",
+          offset = { x = 0, y = -3.5 },
+          major = major,
+        },
       })
-      args.AT.attention_text = true
-
-      args.text = args.AT.UIRoot.children[1]
-
-      if args.cover then
-        Particles(args.pos.x, args.pos.y, 0, 0, {
-          timer_type = "TOTAL",
-          timer = 0.01,
-          pulse_max = 15,
-          max = 0,
-          scale = 0.3,
-          vel_variation = 0.2,
-          padding = 0.1,
-          fill = true,
-          lifespan = 0.5,
-          speed = 2.5,
-          attach = args.AT.UIRoot,
-          colours = {
-            args.cover_colour,
-            args.cover_colour_l,
-            args.cover_colour_d,
-          },
-        })
-      end
-      if args.backdrop_colour then
-        args.backdrop_colour = copy_table(args.backdrop_colour)
-        Particles(args.pos.x, args.pos.y, 0, 0, {
-          timer_type = "TOTAL",
-          timer = 5,
-          scale = 2.4 * (args.backdrop_scale or 1),
-          lifespan = 5,
-          speed = 0,
-          attach = args.AT,
-          colours = { args.backdrop_colour },
-        })
-      end
+      status.AT.attention_text = true
+      status.text = status.AT.UIRoot.children[1]
       return true
     end,
   }))
-  return args
+  return status
 end
 
-function Brainstorm.remove_attention_text(args)
-  if not args or args.removing then
+remove_status_text = function(status)
+  if not status or status.removing then
     return
   end
-  if not args.AT or args.AT.REMOVED then
-    args.AT = nil
+  if not status.AT or status.AT.REMOVED then
+    status.AT = nil
     return
   end
   if not (G and G.E_MANAGER) then
-    args.AT:remove()
-    args.AT = nil
+    status.AT:remove()
+    status.AT = nil
     return
   end
 
-  args.removing = true
+  status.removing = true
   G.E_MANAGER:add_event(Event({
     trigger = "after",
     delay = 0,
     blockable = false,
     blocking = false,
     func = function()
-      if not args.AT or args.AT.REMOVED then
-        args.AT = nil
-        args.removing = false
+      if not status.AT or status.AT.REMOVED then
+        status.AT = nil
+        status.removing = false
         return true
       end
-      if not args.start_time then
-        args.start_time = G.TIMERS.TOTAL
-        if args.text and args.text.pop_out then
-          args.text:pop_out(2)
+      if not status.start_time then
+        status.start_time = G.TIMERS.TOTAL
+        if status.text and status.text.pop_out then
+          status.text:pop_out(2)
         end
       else
-        args.fade = math.max(0, 1 - 3 * (G.TIMERS.TOTAL - args.start_time))
-        if args.cover_colour then
-          args.cover_colour[4] = math.min(args.cover_colour[4], 2 * args.fade)
-        end
-        if args.cover_colour_l then
-          args.cover_colour_l[4] = math.min(args.cover_colour_l[4], args.fade)
-        end
-        if args.cover_colour_d then
-          args.cover_colour_d[4] = math.min(args.cover_colour_d[4], args.fade)
-        end
-        if args.backdrop_colour then
-          args.backdrop_colour[4] = math.min(args.backdrop_colour[4], args.fade)
-        end
-        if args.colour then
-          args.colour[4] = math.min(args.colour[4], args.fade)
-        end
-        if args.fade <= 0 and args.AT then
-          args.AT:remove()
-          args.AT = nil
-          args.removing = false
+        status.fade = math.max(0, 1 - 3 * (G.TIMERS.TOTAL - status.start_time))
+        status.colour[4] = math.min(status.colour[4], status.fade)
+        if status.fade <= 0 then
+          status.AT:remove()
+          status.AT = nil
+          status.removing = false
           return true
         end
       end

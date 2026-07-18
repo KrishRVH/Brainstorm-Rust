@@ -53,7 +53,6 @@ needless_pass_by_value = "allow"
 # The crate exposes a small root facade; explicit crate visibility inside its
 # private implementation modules is intentional and checked by unreachable_pub.
 redundant_pub_crate = "allow"
-should_implement_trait = "allow"
 struct_excessive_bools = "allow"
 struct_field_names = "allow"
 too_many_lines = "allow"

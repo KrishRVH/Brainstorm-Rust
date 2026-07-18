@@ -46,37 +46,22 @@ local voucher_list = {
 }
 
 local pack_list = {
-  ["None"] = {},
-  ["Normal Arcana"] = {
-    "p_arcana_normal_1",
-    "p_arcana_normal_2",
-    "p_arcana_normal_3",
-    "p_arcana_normal_4",
-  },
-  ["Jumbo Arcana"] = { "p_arcana_jumbo_1", "p_arcana_jumbo_2" },
-  ["Mega Arcana"] = { "p_arcana_mega_1", "p_arcana_mega_2" },
-  ["Normal Celestial"] = {
-    "p_celestial_normal_1",
-    "p_celestial_normal_2",
-    "p_celestial_normal_3",
-    "p_celestial_normal_4",
-  },
-  ["Jumbo Celestial"] = { "p_celestial_jumbo_1", "p_celestial_jumbo_2" },
-  ["Mega Celestial"] = { "p_celestial_mega_1", "p_celestial_mega_2" },
-  ["Normal Standard"] = {
-    "p_standard_normal_1",
-    "p_standard_normal_2",
-    "p_standard_normal_3",
-    "p_standard_normal_4",
-  },
-  ["Jumbo Standard"] = { "p_standard_jumbo_1", "p_standard_jumbo_2" },
-  ["Mega Standard"] = { "p_standard_mega_1", "p_standard_mega_2" },
-  ["Normal Buffoon"] = { "p_buffoon_normal_1", "p_buffoon_normal_2" },
-  ["Jumbo Buffoon"] = { "p_buffoon_jumbo_1" },
-  ["Mega Buffoon"] = { "p_buffoon_mega_1" },
-  ["Normal Spectral"] = { "p_spectral_normal_1", "p_spectral_normal_2" },
-  ["Jumbo Spectral"] = { "p_spectral_jumbo_1" },
-  ["Mega Spectral"] = { "p_spectral_mega_1" },
+  ["None"] = "",
+  ["Normal Arcana"] = "p_arcana_normal_1",
+  ["Jumbo Arcana"] = "p_arcana_jumbo_1",
+  ["Mega Arcana"] = "p_arcana_mega_1",
+  ["Normal Celestial"] = "p_celestial_normal_1",
+  ["Jumbo Celestial"] = "p_celestial_jumbo_1",
+  ["Mega Celestial"] = "p_celestial_mega_1",
+  ["Normal Standard"] = "p_standard_normal_1",
+  ["Jumbo Standard"] = "p_standard_jumbo_1",
+  ["Mega Standard"] = "p_standard_mega_1",
+  ["Normal Buffoon"] = "p_buffoon_normal_1",
+  ["Jumbo Buffoon"] = "p_buffoon_jumbo_1",
+  ["Mega Buffoon"] = "p_buffoon_mega_1",
+  ["Normal Spectral"] = "p_spectral_normal_1",
+  ["Jumbo Spectral"] = "p_spectral_jumbo_1",
+  ["Mega Spectral"] = "p_spectral_mega_1",
 }
 
 local function build_sorted_keys(list)
@@ -198,20 +183,6 @@ local ratio_list = Brainstorm.RATIO_MAP
 local ratio_keys =
   { "Disabled", "50%", "60%", "65%", "70%", "75%", "80%", "85%" }
 
-local function clamp_index(index, max_value)
-  if type(index) ~= "number" then
-    return 1
-  end
-  index = math.floor(index)
-  if index < 1 then
-    return 1
-  end
-  if index > max_value then
-    return max_value
-  end
-  return index
-end
-
 local function option_index_for_value(options, value)
   if value == nil or value == "" then
     return 1
@@ -236,65 +207,6 @@ local function option_index_for_mapping(options, mapping, value)
   return 1
 end
 
-local function pack_list_matches(a, b)
-  if a == b then
-    return true
-  end
-  if type(a) ~= "table" or type(b) ~= "table" then
-    return false
-  end
-  if #a ~= #b then
-    return false
-  end
-  for i = 1, #a do
-    if a[i] ~= b[i] then
-      return false
-    end
-  end
-  return true
-end
-
-local function option_index_for_pack(options, pack_value)
-  if pack_value == nil then
-    return 1
-  end
-  if pack_value == "" then
-    pack_value = {}
-  end
-  for i, option in ipairs(options) do
-    local candidate = pack_list[option]
-    if type(pack_value) == "table" then
-      if pack_list_matches(candidate, pack_value) then
-        return i
-      end
-    else
-      if candidate == pack_value then
-        return i
-      end
-      if type(candidate) == "table" then
-        for j = 1, #candidate do
-          if candidate[j] == pack_value then
-            return i
-          end
-        end
-      end
-    end
-  end
-  return 1
-end
-
-local function location_index_for_value(value)
-  if value == nil or value == "" then
-    return 1
-  end
-  for i, option in ipairs(joker_location_keys) do
-    if joker_location_list[option] == value then
-      return i
-    end
-  end
-  return 1
-end
-
 local config = Brainstorm.config
 local write_config = Brainstorm.write_config
 
@@ -307,38 +219,32 @@ local function clear_invalid_joker_selection()
     and joker_list[config.ar_filters.joker_name] == nil
   then
     config.ar_filters.joker_name = ""
-    config.ar_filters.joker_id = 1
     return true
   end
   return false
 end
 
 G.FUNCS.change_target_voucher = function(x)
-  config.ar_filters.voucher_id = x.to_key
   config.ar_filters.voucher_name = voucher_list[x.to_val]
   write_config()
 end
 
 G.FUNCS.change_target_pack = function(x)
-  config.ar_filters.pack_id = x.to_key
   config.ar_filters.pack = pack_list[x.to_val]
   write_config()
 end
 
 G.FUNCS.change_target_tag = function(x)
-  config.ar_filters.tag_id = x.to_key
   config.ar_filters.tag_name = tag_list[x.to_val]
   write_config()
 end
 
 G.FUNCS.change_target_tag2 = function(x)
-  config.ar_filters.tag2_id = x.to_key
   config.ar_filters.tag2_name = tag_list[x.to_val]
   write_config()
 end
 
 G.FUNCS.change_search_joker = function(x)
-  config.ar_filters.joker_id = x.to_key
   config.ar_filters.joker_name = joker_list[x.to_val] or ""
   write_config()
 end
@@ -377,7 +283,6 @@ G.FUNCS.reset_brainstorm_settings = function()
 end
 
 G.FUNCS.change_search_joker_location = function(x)
-  config.ar_filters.joker_location_id = x.to_key
   config.ar_filters.joker_location = joker_location_list[x.to_val] or "any"
   write_config()
 end
@@ -389,19 +294,8 @@ end
 
 G.FUNCS.change_spf = function(x)
   local spf_key = tostring(x.to_val or "")
-  local spf_value = spf_list[spf_key]
-  if spf_value then
-    config.ar_prefs.spf_id = clamp_index(x.to_key, #spf_keys)
-    config.ar_prefs.spf_int = spf_value
-  else
-    local current_key = spf_keys[clamp_index(
-      config.ar_prefs.spf_id or 1,
-      #spf_keys
-    )] or Brainstorm.DEFAULT_SPF_KEY
-    config.ar_prefs.spf_id = option_index_for_value(spf_keys, current_key)
-    config.ar_prefs.spf_int = spf_list[current_key]
-      or spf_list[Brainstorm.DEFAULT_SPF_KEY]
-  end
+  config.ar_prefs.spf_int = spf_list[spf_key]
+    or spf_list[Brainstorm.DEFAULT_SPF_KEY]
   write_config()
 end
 
@@ -411,9 +305,8 @@ G.FUNCS.change_face_count = function(x)
 end
 
 G.FUNCS.change_suit_ratio = function(x)
-  config.ar_prefs.suit_ratio_id = x.to_key
-  config.ar_prefs.suit_ratio_percent = x.to_val
-  config.ar_prefs.suit_ratio_decimal = ratio_list[x.to_val]
+  config.ar_prefs.suit_ratio_percent = ratio_list[x.to_val] and x.to_val
+    or "Disabled"
   write_config()
 end
 
@@ -426,25 +319,12 @@ function Brainstorm.build_settings_tab()
         write_config()
       end
       local joker_option =
-        clamp_index(config.ar_filters.joker_id or 1, #joker_keys)
-      if
-        config.ar_filters.joker_name
-        and config.ar_filters.joker_name ~= ""
-      then
-        joker_option =
-          option_index_for_value(joker_keys, config.ar_filters.joker_name)
-      end
-      local joker_location_option = clamp_index(
-        config.ar_filters.joker_location_id or 1,
-        #joker_location_keys
-      )
-      if
+        option_index_for_value(joker_keys, config.ar_filters.joker_name)
+      local joker_location_option = option_index_for_mapping(
+        joker_location_keys,
+        joker_location_list,
         config.ar_filters.joker_location
-        and config.ar_filters.joker_location ~= ""
-      then
-        joker_location_option =
-          location_index_for_value(config.ar_filters.joker_location)
-      end
+      )
       local tag_option =
         option_index_for_mapping(tag_keys, tag_list, config.ar_filters.tag_name)
       local tag2_option = option_index_for_mapping(
@@ -458,7 +338,7 @@ function Brainstorm.build_settings_tab()
         config.ar_filters.voucher_name
       )
       local pack_option =
-        option_index_for_pack(pack_keys, config.ar_filters.pack)
+        option_index_for_mapping(pack_keys, pack_list, config.ar_filters.pack)
       return {
         n = G.UIT.ROOT,
         config = {
@@ -593,9 +473,10 @@ function Brainstorm.build_settings_tab()
                 w = 4,
                 options = spf_keys,
                 opt_callback = "change_spf",
-                current_option = clamp_index(
-                  Brainstorm.config.ar_prefs.spf_id or 1,
-                  #spf_keys
+                current_option = option_index_for_mapping(
+                  spf_keys,
+                  spf_list,
+                  Brainstorm.config.ar_prefs.spf_int
                 ),
               }),
               create_toggle({
@@ -643,7 +524,10 @@ function Brainstorm.build_settings_tab()
                 w = 4,
                 options = ratio_keys,
                 opt_callback = "change_suit_ratio",
-                current_option = Brainstorm.config.ar_prefs.suit_ratio_id or 1,
+                current_option = option_index_for_value(
+                  ratio_keys,
+                  Brainstorm.config.ar_prefs.suit_ratio_percent
+                ),
               }),
               UIBox_button({
                 label = { "Reset All" },

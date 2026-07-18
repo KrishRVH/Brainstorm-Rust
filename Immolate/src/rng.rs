@@ -7,7 +7,7 @@ const K_DBL_EXPO_BIAS: u64 = 1023;
 const PI_HASH: f64 = 3.141592653589793116;
 
 #[derive(Clone, Copy, Debug)]
-pub struct LuaRandom {
+pub(crate) struct LuaRandom {
     state: [u64; 4],
 }
 
@@ -18,7 +18,7 @@ impl Default for LuaRandom {
 }
 
 impl LuaRandom {
-    pub fn new(seed: f64) -> Self {
+    pub(crate) fn new(seed: f64) -> Self {
         let mut d = seed;
         let mut r = 0x1109_0601_u64;
         let mut state = [0_u64; 4];
@@ -69,7 +69,7 @@ impl LuaRandom {
         (self.randint_raw() & K_DBL_MANT) | 1.0_f64.to_bits()
     }
 
-    pub fn random(&mut self) -> f64 {
+    pub(crate) fn random(&mut self) -> f64 {
         f64::from_bits(self.randdblmem()) - 1.0
     }
 
@@ -100,19 +100,6 @@ pub(crate) fn fract(x: f64) -> f64 {
     let res_expo = (expo - frac_lzcnt - 1) << K_DBL_MANT_SIZE;
     let res_mant = (frac_mant << (frac_lzcnt + 1)) & K_DBL_MANT;
     f64::from_bits(res_expo | res_mant)
-}
-
-pub fn pseudohash(bytes: &str) -> f64 {
-    pseudohash_bytes(bytes.as_bytes())
-}
-
-fn pseudohash_bytes(bytes: &[u8]) -> f64 {
-    let mut num = 1.0;
-    for i in (0..bytes.len()).rev() {
-        let pos = i + 1;
-        num = fract(1.1239285023 / num * f64::from(bytes[i]) * PI_HASH + PI_HASH * pos as f64);
-    }
-    num
 }
 
 pub(crate) fn pseudohash_from(bytes: &str, num: f64) -> f64 {

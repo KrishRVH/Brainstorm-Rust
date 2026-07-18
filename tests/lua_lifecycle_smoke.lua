@@ -1,4 +1,4 @@
--- luacheck: ignore 131/love 131/Controller 131/create_UIBox_round_scores_row 131/Event 131/lighten 131/darken 131/Particles 131/DynaText 131/UIBox
+-- luacheck: ignore 131/love 131/Controller 131/create_UIBox_round_scores_row 131/Event 131/UIBox
 
 local repo = assert(arg[1], "repository path is required")
 
@@ -19,9 +19,6 @@ package.preload.nativefs = function()
     createDirectory = function()
       return true
     end,
-    getDirectoryItems = function()
-      return {}
-    end,
   }
 end
 package.preload.ffi = function()
@@ -39,7 +36,6 @@ local deleted_runs = 0
 local queued_events = {}
 local captured_uibox
 local removed_boxes = 0
-local dynatext_calls = 0
 
 love = {
   timer = {
@@ -76,7 +72,6 @@ G = {
   play = { T = { x = 0, y = 0, w = 1, h = 1 } },
   title_top = {},
   UIT = { ROOT = "ROOT", T = "TEXT" },
-  SPEEDFACTOR = 1,
   TIMERS = { TOTAL = 0 },
   C = {
     WHITE = { 1, 1, 1, 1 },
@@ -108,17 +103,6 @@ copy_table = function(value)
   end
   return result
 end
-lighten = function(value)
-  return copy_table(value)
-end
-darken = function(value)
-  return copy_table(value)
-end
-Particles = function() end
-DynaText = function()
-  dynatext_calls = dynatext_calls + 1
-  error("live status must not construct DynaText")
-end
 UIBox = function(args)
   captured_uibox = args
   local box = {
@@ -133,6 +117,43 @@ UIBox = function(args)
 end
 
 assert(loadfile(repo .. "/Brainstorm.lua"))()
+
+local normalized = Brainstorm.normalize_config({
+  ar_filters = {
+    pack = "p_arcana_normal_1",
+    pack_id = 9,
+    voucher_name = "v_telescope",
+    voucher_id = 7,
+  },
+  ar_prefs = {
+    spf_int = 250000,
+    spf_id = 2,
+    suit_ratio_percent = "75%",
+    suit_ratio_id = 6,
+    suit_ratio_decimal = 0.1,
+  },
+})
+assert(normalized.ar_filters.pack == "p_arcana_normal_1")
+assert(normalized.ar_filters.voucher_name == "v_telescope")
+assert(normalized.ar_prefs.spf_int == 250000)
+assert(normalized.ar_prefs.suit_ratio_percent == "75%")
+for _, key in ipairs({
+  "pack_id",
+  "voucher_id",
+  "tag_id",
+  "tag2_id",
+  "joker_id",
+  "joker_location_id",
+}) do
+  assert(normalized.ar_filters[key] == nil)
+end
+for _, key in ipairs({ "spf_id", "suit_ratio_id", "suit_ratio_decimal" }) do
+  assert(normalized.ar_prefs[key] == nil)
+end
+assert(
+  Brainstorm.normalize_config({ ar_filters = { pack = { "legacy" } } }).ar_filters.pack
+    == ""
+)
 
 local function reset_active()
   Brainstorm.ar_active = true
@@ -196,15 +217,14 @@ assert(not Brainstorm.ar_active)
 G.STAGE = "RUN"
 
 queued_events = {}
-local status = Brainstorm.attention_text({
-  scale = 1.4,
-  ref_table = Brainstorm,
-  ref_value = "ar_status_text",
-  emboss = false,
-  major = G.play,
-})
+Brainstorm.auto_reroll = function()
+  return nil
+end
+Brainstorm.ar_text = nil
+Brainstorm.ar_active = true
+Game:update(1 / 60)
+local status = assert(Brainstorm.ar_text)
 assert(#queued_events == 1 and not status.cancelled)
-assert(status.emboss == nil)
 assert(queued_events[1].func())
 assert(status.AT and captured_uibox)
 local text_config = captured_uibox.definition.nodes[1].config
@@ -212,10 +232,7 @@ assert(captured_uibox.definition.nodes[1].n == G.UIT.T)
 assert(text_config.ref_table == Brainstorm)
 assert(text_config.ref_value == "ar_status_text")
 assert(text_config.draw_layer == 1 and text_config.shadow == true)
-assert(dynatext_calls == 0)
 
-Brainstorm.ar_text = status
-Brainstorm.ar_active = true
 Brainstorm.stop_auto_reroll()
 assert(not Brainstorm.ar_active and Brainstorm.ar_text == nil)
 assert(status.cancelled and status.removing and #queued_events == 2)
@@ -227,9 +244,13 @@ assert(removal.func() == true)
 assert(status.AT == nil and not status.removing and removed_boxes == 1)
 
 queued_events = {}
-local cancelled = Brainstorm.attention_text({ major = G.play })
+Brainstorm.ar_text = nil
+Brainstorm.ar_active = true
+Game:update(1 / 60)
+local cancelled = assert(Brainstorm.ar_text)
 assert(#queued_events == 1)
-cancelled.cancelled = true
+Brainstorm.stop_auto_reroll()
+assert(cancelled.cancelled)
 assert(queued_events[1].func())
 assert(cancelled.AT == nil)
 

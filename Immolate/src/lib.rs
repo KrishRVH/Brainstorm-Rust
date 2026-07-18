@@ -15,7 +15,6 @@ mod seed;
 pub use engine::config::CompiledFilter;
 pub use engine::search::brainstorm_search_core;
 pub use filters::FilterConfig;
-pub use rng::{LuaRandom, pseudohash};
 pub use seed::{SEED_SPACE, Seed};
 
 #[cfg(test)]
@@ -40,7 +39,7 @@ mod tests {
         COMMON_JOKERS, COMMON_JOKERS_100, Item, LEGENDARY_JOKERS, RARE_JOKERS, RARE_JOKERS_100,
         UNCOMMON_JOKERS, UNCOMMON_JOKERS_100, item_to_string,
     };
-    use crate::rng::{LuaRandom, fract, pseudohash, pseudohash_from, pseudostep, round13};
+    use crate::rng::{LuaRandom, fract, pseudohash_from, pseudostep, round13};
     use crate::search::resolve_seed_budget;
     use crate::seed::Seed;
 
@@ -58,7 +57,7 @@ mod tests {
     fn seed_id_roundtrip_for_basic_seed() {
         for id in [0, 1, 2, 35, 36, 37, 1_000, 1_000_000] {
             let seed = Seed::from_id(id);
-            assert_eq!(Seed::from_str(&seed.to_string()).id(), id);
+            assert_eq!(Seed::from(seed.to_string().as_str()).id(), id);
         }
     }
 
@@ -153,7 +152,7 @@ mod tests {
 
     #[test]
     fn rng_smoke_is_stable() {
-        assert_eq!(pseudohash(""), 1.0);
+        assert_eq!(pseudohash_from("", 1.0), 1.0);
         let mut rng = LuaRandom::new(0.5);
         let first = rng.random();
         assert!((0.0..1.0).contains(&first));
@@ -171,7 +170,7 @@ mod tests {
             ("soul_Spectral1", 0.24677008613650742),
         ];
         for (input, expected) in hash_cases {
-            assert_close(pseudohash(input), expected);
+            assert_close(pseudohash_from(input, 1.0), expected);
         }
 
         let mut rng = LuaRandom::new(0.5);
@@ -1017,14 +1016,14 @@ mod tests {
             brainstorm_search_core(seed, &one_soul_perkeo, 1, 1).as_deref(),
             Some(seed),
         );
-        let mut one_soul_instance = Instance::new(Seed::from_str(seed));
+        let mut one_soul_instance = Instance::new(Seed::from(seed));
         assert!(crate::filters::apply_filters(
             &mut one_soul_instance,
             &one_soul_perkeo
         ));
 
         assert_eq!(brainstorm_search_core(seed, &two_souls_perkeo, 1, 1), None);
-        let mut two_soul_instance = Instance::new(Seed::from_str(seed));
+        let mut two_soul_instance = Instance::new(Seed::from(seed));
         assert!(!crate::filters::apply_filters(
             &mut two_soul_instance,
             &two_souls_perkeo
@@ -1103,7 +1102,7 @@ mod tests {
         let prefix = compiled.serial_prefix_size();
         let block = compiled.chunk_size();
         let target = "1WR71111";
-        let target_id = Seed::from_str(target).id();
+        let target_id = Seed::from(target).id();
 
         for offset in [
             prefix - 1,
@@ -1142,7 +1141,7 @@ mod tests {
         let compiled = CompiledFilter::compile(&cfg);
         let offset = compiled.serial_prefix_size() + compiled.parallel_threshold() - 1;
         let target = "1WR71111";
-        let seed_start = Seed::from_id(Seed::from_str(target).id() - offset).to_string();
+        let seed_start = Seed::from_id(Seed::from(target).id() - offset).to_string();
 
         for threads in [i32::MIN, -1, 0, 1, 2, 16, i32::MAX] {
             assert_eq!(
@@ -1307,7 +1306,7 @@ mod tests {
             let cfg = filter_config_from_benchmark(&case);
             let compiled = CompiledFilter::compile(&cfg);
             for seed_start in ["", "KRVH1234", "ZZZYZZZZ"] {
-                let mut state = SearchState::from_id(Seed::from_str(seed_start).id());
+                let mut state = SearchState::from_id(Seed::from(seed_start).id());
                 for offset in 0..256 {
                     let mut instance = Instance::new(state.seed.clone());
                     let expected = crate::filters::apply_filters(&mut instance, &cfg);
@@ -1866,7 +1865,7 @@ mod tests {
         );
 
         let compiled = CompiledFilter::compile(cfg);
-        let mut state = SearchState::from_id(Seed::from_str(seed).id());
+        let mut state = SearchState::from_id(Seed::from(seed).id());
         assert!(
             apply_compiled_filter(&mut state, &compiled),
             "{name}: optimized predicate rejected target seed {seed}",
@@ -1898,7 +1897,7 @@ mod tests {
     }
 
     fn source_oracle_search(seed_start: &str, cfg: &FilterConfig, budget: i64) -> Option<String> {
-        let mut seed = Seed::from_str(seed_start);
+        let mut seed = Seed::from(seed_start);
         for _ in 0..resolve_seed_budget(budget) {
             let mut inst = Instance::new(seed.clone());
             if crate::filters::apply_filters(&mut inst, cfg) {
@@ -1933,7 +1932,7 @@ mod tests {
     }
 
     fn source_oracle_passes_seed(seed: &str, cfg: &FilterConfig) -> bool {
-        let mut inst = Instance::new(Seed::from_str(seed));
+        let mut inst = Instance::new(Seed::from(seed));
         crate::filters::apply_filters(&mut inst, cfg)
     }
 

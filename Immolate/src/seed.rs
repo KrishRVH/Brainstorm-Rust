@@ -34,8 +34,8 @@ impl Default for Seed {
     }
 }
 
-impl Seed {
-    pub fn from_str(seed: &str) -> Self {
+impl From<&str> for Seed {
+    fn from(seed: &str) -> Self {
         let mut out = Self::default();
         let bytes = seed.as_bytes();
         out.length = bytes.len().min(8);
@@ -44,7 +44,9 @@ impl Seed {
         }
         out
     }
+}
 
+impl Seed {
     pub fn from_id(mut id: i64) -> Self {
         id = id.rem_euclid(SEED_SPACE);
         let mut out = Self::default();
@@ -197,14 +199,14 @@ mod tests {
 
     #[test]
     fn cache_validity_survives_carry_wrap_and_growth() {
-        let mut seed = Seed::from_str("ZYZZZZZZ");
+        let mut seed = Seed::from("ZYZZZZZZ");
         for expected in ["ZYZZZZZZ", "ZZZZZZZ", "1ZZZZZZZ"] {
             assert_eq!(seed.to_string(), expected);
             assert_cache_matches_uncached(&mut seed);
             seed.next();
         }
 
-        let mut seed = Seed::from_str("ZZZZZZZZ");
+        let mut seed = Seed::from("ZZZZZZZZ");
         for expected in ["ZZZZZZZZ", "", "1"] {
             assert_eq!(seed.to_string(), expected);
             assert_cache_matches_uncached(&mut seed);
@@ -216,7 +218,7 @@ mod tests {
     fn fused_next_hash_matches_separate_operations() {
         for start in ["", "1", "Z", "11111111", "Z1111111", "ZZ111111", "ZZZZZZZZ"] {
             for warm_cache in [false, true] {
-                let mut expected = Seed::from_str(start);
+                let mut expected = Seed::from(start);
                 let mut actual = expected.clone();
                 if warm_cache {
                     expected.pseudohash(0);

@@ -154,8 +154,7 @@ fn scanned_count(no_match: bool, seed_start: &str, result: Option<&str>, budget:
     if result.is_empty() {
         return 1;
     }
-    ((Seed::from_str(result).id() - Seed::from_str(seed_start).id()).rem_euclid(SEED_SPACE) + 1)
-        .min(budget)
+    ((Seed::from(result).id() - Seed::from(seed_start).id()).rem_euclid(SEED_SPACE) + 1).min(budget)
 }
 
 fn parse_args() -> Result<Args, String> {

@@ -56,7 +56,6 @@ check_cmd() {
 
 check_cmd rustup
 check_cmd cargo
-check_cmd python3
 check_cmd stylua
 check_cmd luajit
 check_cmd luarocks
@@ -382,7 +381,11 @@ native_stage_args=()
 if [[ -n "${BENCH_NATIVE_STAGE_DIR:-}" ]]; then
   native_stage_args=(--native-stage-dir "$BENCH_NATIVE_STAGE_DIR")
 fi
-python3 "$IMMO_DIR/scripts/bench_current_compare.py" \
+cargo run --quiet \
+  --manifest-path "$IMMO_DIR/Cargo.toml" \
+  --release \
+  --bin bench_current_compare \
+  -- \
   --harness "$IMMO_DIR/target/$rust_target/release/immolate_dll_harness.exe" \
   --baseline "$baseline" \
   --candidate "$candidate" \
@@ -455,7 +458,6 @@ mise run fmt-rust-check
 mise run clippy-rust
 mise run doc-rust
 mise run test-rust
-python3 "$IMMO_DIR/scripts/bench_current_compare.py" --self-test
 mise run check-rust-dll
 mise run build-harness
 
@@ -639,4 +641,4 @@ rsync -a --delete --exclude config.lua "$stage_dir"/ "$target"/
 
 [tasks.clean]
 description = "Remove build and release artifacts"
-run = "rm -rf Immolate/target release target"
+run = "rm -rf Immolate/target release target && rm -f Immolate.dll"

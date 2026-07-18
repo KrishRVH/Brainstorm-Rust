@@ -10,21 +10,21 @@ release/
 profiling_results/
 
 # Temporary files and logs
-*.tmp
-*.temp
-*.log
 *.bak
 *.backup
+*.log
+*.temp
+*.tmp
 *~
 
 # IDE files
-.vscode/
 .idea/
 .vs/
+.vscode/
 *.suo
-*.user
-*.swp
 *.swo
+*.swp
+*.user
 
 # OS files
 .DS_Store
@@ -36,11 +36,6 @@ desktop.ini
 
 # Runtime config (user-specific)
 config.lua
-
-# Python (for any test scripts)
-__pycache__/
-*.pyc
-*.pyo
 
 # Extracted game files (copyright)
 BalatroSource/

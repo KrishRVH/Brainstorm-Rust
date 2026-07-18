@@ -86,8 +86,8 @@ This project is licensed under CC BY-NC-SA 4.0.
 
 - MinGW-w64 and Wine are required for Windows DLL builds, DLL validation, and
   benchmarks.
-- Python 3 and WSL interoperability (`wslpath` and `cmd.exe`) are required for
-  the native-Windows current/current regression gate.
+- WSL interoperability (`wslpath` and `cmd.exe`) is required for the
+  native-Windows current/current regression gate.
 - Write access to `%AppData%\Roaming\Balatro\Mods`.
 
 ## Build & Deploy (from source)
@@ -99,8 +99,8 @@ then use `mise run <task>`.
 `target/rust/Immolate.dll`.
 
 `mise run lint` runs Lua formatting, LuaJIT bytecode syntax checks, luacheck,
-rustfmt, and clippy. `mise run check-rust` runs Rust formatting, clippy, unit
-tests, DLL export/import validation, and hit/composite benchmark smokes.
+rustfmt, clippy, and private-item rustdoc checks. `mise run check-rust` adds
+unit tests, DLL export/import validation, and hit/composite benchmark smokes.
 `mise run check` runs Lua lint, the mocked frame/status lifecycle smoke, and
 the Rust validation gate.
 
@@ -192,8 +192,7 @@ Brainstorm/
 ```
 
 User settings are generated at runtime in Balatro's Love save directory and are
-not part of the release payload. Existing legacy `config.lua` files in a mod
-folder are migrated into that save-directory config.
+not part of the release payload.
 
 ## Usage
 

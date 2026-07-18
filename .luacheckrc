@@ -1,24 +1,24 @@
 -- Balatro globals
 globals = {
     "Brainstorm",
-    "G",
-    "STR_PACK",
-    "STR_UNPACK",
     "Controller",
     "Event",
+    "G",
     "Game",
-    "Particles",
+    "STR_PACK",
+    "STR_UNPACK",
     "UIBox",
     "UIBox_button",
     "attention_text",
     "compress_and_save",
     "copy_table",
+    "create_UIBox_round_scores_row",
     "create_option_cycle",
+    "create_tabs",
     "create_text_input",
     "create_toggle",
     "darken",
     "get_compressed",
-    "lighten",
     "number_format",
     "play_sound",
     "random_string"
@@ -49,15 +49,17 @@ max_comment_line_length = false
 -- Cyclomatic complexity threshold
 max_cyclomatic_complexity = 30
 
--- Balatro callbacks include intentionally unused parameters.
-unused_args = false
-unused_secondaries = false
-self = false
-
 -- Exclude the untracked game source.
 exclude_files = {
     "BalatroSource/**"
 }
 
--- Allow certain patterns
-allow_defined_top = true
+files["nativefs.lua"] = {
+    unused_args = false,
+    unused_secondaries = false,
+}
+
+files["tests/*.lua"] = {
+    globals = { "love" },
+    unused_args = false,
+}
