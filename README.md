@@ -86,6 +86,8 @@ This project is licensed under CC BY-NC-SA 4.0.
 
 - MinGW-w64 and Wine are required for Windows DLL builds, DLL validation, and
   benchmarks.
+- Python 3 and WSL interoperability (`wslpath` and `cmd.exe`) are required for
+  the native-Windows current/current regression gate.
 - Write access to `%AppData%\Roaming\Balatro\Mods`.
 
 ## Build & Deploy (from source)
@@ -99,16 +101,26 @@ then use `mise run <task>`.
 `mise run lint` runs Lua formatting, LuaJIT bytecode syntax checks, luacheck,
 rustfmt, and clippy. `mise run check-rust` runs Rust formatting, clippy, unit
 tests, DLL export/import validation, and hit/composite benchmark smokes.
-`mise run check` runs Lua lint plus the Rust validation gate.
+`mise run check` runs Lua lint, the mocked frame/status lifecycle smoke, and
+the Rust validation gate.
 
-Strict user-facing full-suite benchmark report:
+Strict user-facing regression check against a frozen current-ABI DLL:
+
+```bash
+BENCH_BASELINE_DLL=/path/to/frozen/Immolate.dll mise run bench-current-compare
+```
+
+Historical full-suite benchmark report:
 
 ```bash
 mise run bench-full
 ```
 
-This uses the same `threads=0` path as Lua auto-reroll and fails if any
-comparable Rust/original case drops below parity.
+Both use the same `threads=0` path as Lua auto-reroll. The current/current
+command runs natively on Windows, freezes and hashes its artifacts, requires
+exact result/scanned equality, and gates p50/p95/p99/mean latency. Original-DLL
+ratios are informational except for the one-candidate baseline because its seed
+order differs. `BENCH_EXECUTOR=wine` is a portability diagnostic only.
 
 DLL UX-fixture benchmark report using UI-reachable cases and Lua-style
 `threads=0`:

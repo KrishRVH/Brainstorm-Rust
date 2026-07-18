@@ -39,6 +39,31 @@ Run the Rust DLL benchmark only:
 BENCH_BUDGET=100000 BENCH_REPEAT=3 BENCH_CASE=all mise run bench
 ```
 
+Compare a frozen current-ABI DLL against the current build:
+
+```bash
+BENCH_BASELINE_DLL=/path/to/frozen/Immolate.dll \
+  BENCH_CASE=ux BENCH_BUDGET=100000 BENCH_THREADS=0 \
+  mise run bench-current-compare
+```
+
+This is the strict native-Windows performance-regression command. It freezes
+input DLLs before building, stages all three artifacts on the Windows-local
+temporary filesystem, records settings and pre-run hashes, runs alternating
+`A/B/B/A` and `B/A/A/B` cycles, and rejects any mid-run artifact change. Every
+result and scanned count must match. It gates p50, p95, p99, and mean latency on
+stable majority-cycle losses or concordant paired-cycle median and pooled
+losses over both the configured ratio and absolute noise floor.
+
+The defaults are four cycles and 31 repeats. Treat any tail `watch` row as a
+prompt for a targeted confirmation with at least
+`BENCH_CURRENT_CYCLES=8 BENCH_REPEAT=101 BENCH_WARMUP=10`; do not relax the
+threshold after seeing the data. Keep other CPU work stopped. Set
+`BENCH_CANDIDATE_DLL` to compare two already-built artifacts. Set
+`BENCH_EXECUTOR=wine` only for a portability diagnostic; Wine timings are not
+release evidence because its scheduler behavior can differ from native
+Windows.
+
 Compare Rust against the Original Brainstorm DLL:
 
 ```bash
@@ -84,6 +109,8 @@ Use `mise run setup` for mise-managed tools plus local Lua lint tooling, then
   `rustup target add x86_64-pc-windows-gnu`
 - MinGW-w64 for Windows target linking and DLL inspection.
 - Wine for running the Windows DLL harness.
+- Python 3 for the current/current regression gate.
+- WSL interoperability (`wslpath` and `cmd.exe`) for native-Windows timing.
 
 Wine may print a `wine32 is missing` warning on Linux. That warning is not a
 failure for this project as long as the 64-bit harness continues and exits
@@ -104,6 +131,13 @@ The mise tasks read these environment variables:
 - `BENCH_COLOR=auto|always|never`
 - `ORIGINAL_DLL=Immolate/Immolate-OceanRamenandMathIsFun0.dll`
 - `BENCH_ORIGINAL_DLL=/path/to/original.dll`
+- `BENCH_BASELINE_DLL=/path/to/frozen/current-ABI.dll`
+- `BENCH_CANDIDATE_DLL=/path/to/candidate/current-ABI.dll`
+- `BENCH_EXECUTOR=native|wine`
+- `BENCH_NATIVE_STAGE_DIR=/mnt/c/path/to/local/temp`
+- `BENCH_CURRENT_CYCLES=4`
+- `BENCH_CURRENT_MIN_RATIO=0.99`
+- `BENCH_CURRENT_MIN_REGRESSION_MS=0.005`
 
 `BENCH_BUDGET` is the search budget passed to the Rust DLL as `num_seeds`.
 `BENCH_REPEAT` controls repeated measurements for each case. Use at least
@@ -141,7 +175,6 @@ includes:
 - `ns/seed`, which is often the clearest hot-path metric
 - coefficient of variation (`cv`) to flag noisy measurements
 - Rust/original speedup ratio
-- geometric-mean speedups per profiling group
 - a potential-regressions section when Rust is slower than the target ratio
 - a high-variance section when either measured implementation has CV above 5%
 
@@ -216,6 +249,28 @@ one-candidate `baseline-hit` fixture. Use the frozen current-build versus
 candidate benchmark for performance regression decisions across current
 semantics.
 
+## Performance Policies
+
+These are measured policies, not general abstractions. Keep the independent
+`Instance` source oracle unchanged when tuning them.
+
+| Surface | Retained policy | Reopen only with |
+| --- | --- | --- |
+| Current regression gate | Compare two current-ABI DLLs natively on Windows with `bench-current-compare`; historical and Wine ratios are context only. | Exact result/scanned equality plus frozen, counterbalanced native-Windows p50/p95/p99/mean data. |
+| Scheduler shapes | Expensive mixed/Joker/Soul/Perkeo/Erratic work may use 16 auto threads; nearby voucher/second-pack hits stay capped at 8. Prefixes and chunks remain shape-local in `CompiledFilter`. | Windows data across early hits, full misses, `threads=0`, and `threads=1`; no stable tail loss. |
+| Erratic draws | `ErraticDraws` owns one initialized RNG cursor and derives only face/suit properties from the exact mantissa. | Boundary and million-sample parity against the float/source path. |
+| Seed progression | Fuse sequential seed increment and hash update, but keep arbitrary-ID construction normalized and independently tested. | Carry, growth, wrap, cache-validity, and earliest-result proofs. |
+| Predicate order | Order independent keyed checks by measured rejection cost; preserve source generation order when state or locks are shared. | Source-oracle windows and held-out controls, not one favorable fixture. |
+| Lua active loop | One synchronous batch per active `Game.update`; status text uses the native ref-backed text node. | In-game frame/cancellation evidence and the tracked lifecycle smoke. |
+| Settings pips | Suppress only the unreadable 140-choice Joker and 36-choice face-count pip rows. | A supported native UI alternative or visual regression evidence. |
+
+Avoid repeating already falsified families without new evidence: blanket
+inlining, generic integer replacements for Lua float rounding, shared helpers
+that outline hot RNG initialization, smaller universal scheduler blocks,
+cross-target PGO profiles, or process-lifetime worker pools inside an unloadable
+DLL. Each either regressed held-out paths, failed exact numeric parity, or broke
+the unload contract.
+
 ## Optional Native Rust-Only Benchmark
 
 For quick Linux-side profiling of the Rust core without the Windows DLL ABI,
@@ -243,12 +298,12 @@ Useful exact UX cases include `ux-pack-joker-no-pack`,
 Before changing hot-path code:
 
 1. Run `mise run check-rust`.
-2. Run the complete report with `BENCH_CASE=all`,
-   `BENCH_BUDGET=1000000`, `BENCH_REPEAT=7`, and `BENCH_WARMUP=2`.
-3. Run the UX report with `BENCH_CASE=ux`, `BENCH_BUDGET=100000`, and
-   `BENCH_THREADS=0`.
-4. Inspect the skipped Original measurements before drawing conclusions from
-   the Rust/original ratio.
+2. Freeze the current DLL under a unique name before editing.
+3. Run native `bench-current-compare` for the complete and UX catalogs at
+   realistic budgets with `BENCH_THREADS=0`; investigate every regression or
+   tail `watch`, then use `BENCH_THREADS=1` only as a diagnostic.
+4. Inspect the historical report only for context; all non-baseline legacy
+   ratios are informational because the seed orders differ.
 
 When adding a benchmark fixture, update `Immolate/src/bench_cases.rs`. Both
 `Immolate/src/bin/immolate_dll_harness.rs` and

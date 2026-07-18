@@ -47,10 +47,14 @@ DLL named Immolate. Keep agent work source-faithful, scoped, and validated.
 - Release: `mise run release`.
 - Version bump: `VERSION=<VERSION> mise run bump-version`.
 - Bench current DLL: `BENCH_CASE=ux BENCH_BUDGET=100000 mise run bench`.
+- Strict current regression check:
+  `BENCH_BASELINE_DLL=/path/to/frozen/Immolate.dll mise run bench-current-compare`.
+  It runs natively on Windows by default; `BENCH_EXECUTOR=wine` is diagnostic.
 - Compare to Original DLL: `mise run bench-compare`.
 - Full reports: `mise run bench-full` for TSV automation and
-  `mise run bench-pretty` for a compact human-readable report. Both use
-  `threads=0` and fail if any comparable Rust/original case drops below parity.
+  `mise run bench-pretty` for a compact human-readable historical report. Both
+  use `threads=0`; only the one-candidate baseline is strict-comparable because
+  current and Original DLLs traverse seeds in different orders.
 - UX-fixture report: `mise run bench-ux` measures DLL calls using
   UI-reachable cases and `threads=0`; it is not an in-game Lua profiler.
 - Native core benchmark:

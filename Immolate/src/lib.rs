@@ -1160,21 +1160,12 @@ mod tests {
         assert_eq!(compiled.chunk_size(), 1_024);
 
         let budget = 147_920;
-        let expected = source_oracle_search("", &cfg, budget);
-        assert_eq!(expected.as_deref(), Some("CBD41111"));
-
-        for threads in [0, 1, 2, 4, 8, 16, i32::MAX] {
-            assert_eq!(
-                brainstorm_search_core("", &cfg, budget - 1, threads),
-                None,
-                "AnyJoker search crossed its budget with {threads} threads",
-            );
-            assert_eq!(
-                brainstorm_search_core("", &cfg, budget, threads),
-                expected,
-                "AnyJoker search changed its earliest result with {threads} threads",
-            );
-        }
+        assert_source_earliest_across_threads(
+            "ux-mega-spectral-any-baseball-card",
+            &cfg,
+            budget,
+            "CBD41111",
+        );
     }
 
     #[test]
@@ -1187,21 +1178,12 @@ mod tests {
         assert_eq!(compiled.chunk_size(), 1_024);
 
         let budget = 6_221;
-        let expected = source_oracle_search("", &cfg, budget);
-        assert_eq!(expected.as_deref(), Some("HX511111"));
-
-        for threads in [0, 1, 2, 4, 8, 16, i32::MAX] {
-            assert_eq!(
-                brainstorm_search_core("", &cfg, budget - 1, threads),
-                None,
-                "Perkeo search crossed its budget with {threads} threads",
-            );
-            assert_eq!(
-                brainstorm_search_core("", &cfg, budget, threads),
-                expected,
-                "Perkeo search changed its earliest result with {threads} threads",
-            );
-        }
+        let expected = assert_source_earliest_across_threads(
+            "ux-perkeo-arcana-normal",
+            &cfg,
+            budget,
+            "HX511111",
+        );
         assert_eq!(
             brainstorm_search_core("", &cfg, 100_000, 0),
             expected,
@@ -1217,21 +1199,12 @@ mod tests {
         assert_eq!(CompiledFilter::compile(&cfg).shape, KernelShape::Composite);
 
         let budget = 41_112;
-        let expected = source_oracle_search("", &cfg, budget);
-        assert_eq!(expected.as_deref(), Some("WLX11111"));
-
-        for threads in [0, 1, 2, 4, 8, 16, i32::MAX] {
-            assert_eq!(
-                brainstorm_search_core("", &cfg, budget - 1, threads),
-                None,
-                "normal Arcana Soul/Joker search crossed its budget with {threads} threads",
-            );
-            assert_eq!(
-                brainstorm_search_core("", &cfg, budget, threads),
-                expected,
-                "normal Arcana Soul/Joker search changed its earliest result with {threads} threads",
-            );
-        }
+        assert_source_earliest_across_threads(
+            "ux-normal-arcana-soul-half-joker",
+            &cfg,
+            budget,
+            "WLX11111",
+        );
     }
 
     #[test]
@@ -1242,21 +1215,12 @@ mod tests {
         assert_eq!(CompiledFilter::compile(&cfg).shape, KernelShape::Composite);
 
         let budget = 52_862;
-        let expected = source_oracle_search("", &cfg, budget);
-        assert_eq!(expected.as_deref(), Some("X721111"));
-
-        for threads in [0, 1, 2, 4, 8, 16, i32::MAX] {
-            assert_eq!(
-                brainstorm_search_core("", &cfg, budget - 1, threads),
-                None,
-                "Jumbo Arcana Soul/Joker search crossed its budget with {threads} threads",
-            );
-            assert_eq!(
-                brainstorm_search_core("", &cfg, budget, threads),
-                expected,
-                "Jumbo Arcana Soul/Joker search changed its earliest result with {threads} threads",
-            );
-        }
+        assert_source_earliest_across_threads(
+            "ux-jumbo-arcana-soul-joker",
+            &cfg,
+            budget,
+            "X721111",
+        );
     }
 
     #[test]
@@ -1269,21 +1233,7 @@ mod tests {
         ] {
             let cfg = filter_config_from_benchmark(&benchmark_case(case_name));
             assert_eq!(CompiledFilter::compile(&cfg).shape, KernelShape::Composite);
-
-            let expected = source_oracle_search("", &cfg, budget);
-            assert_eq!(expected.as_deref(), Some(target));
-            for threads in [0, 1, 2, 4, 8, 16, i32::MAX] {
-                assert_eq!(
-                    brainstorm_search_core("", &cfg, budget - 1, threads),
-                    None,
-                    "{case_name} crossed its budget with {threads} threads",
-                );
-                assert_eq!(
-                    brainstorm_search_core("", &cfg, budget, threads),
-                    expected,
-                    "{case_name} changed its earliest result with {threads} threads",
-                );
-            }
+            assert_source_earliest_across_threads(case_name, &cfg, budget, target);
         }
     }
 
@@ -1295,20 +1245,12 @@ mod tests {
         assert_eq!(CompiledFilter::compile(&cfg).shape, KernelShape::Composite);
 
         let budget = 548_953;
-        let expected = source_oracle_search("", &cfg, budget);
-        assert_eq!(expected.as_deref(), Some("2CGD1111"));
-        for threads in [0, 1, 2, 4, 8, 16, i32::MAX] {
-            assert_eq!(
-                brainstorm_search_core("", &cfg, budget - 1, threads),
-                None,
-                "dual-tag voucher/Joker search crossed its budget with {threads} threads",
-            );
-            assert_eq!(
-                brainstorm_search_core("", &cfg, budget, threads),
-                expected,
-                "dual-tag voucher/Joker search changed its earliest result with {threads} threads",
-            );
-        }
+        assert_source_earliest_across_threads(
+            "ux-dual-tag-voucher-blueprint",
+            &cfg,
+            budget,
+            "2CGD1111",
+        );
     }
 
     #[test]
@@ -1959,6 +1901,29 @@ mod tests {
             seed.next();
         }
         None
+    }
+
+    fn assert_source_earliest_across_threads(
+        case_name: &str,
+        cfg: &FilterConfig,
+        budget: i64,
+        target: &str,
+    ) -> Option<String> {
+        let expected = source_oracle_search("", cfg, budget);
+        assert_eq!(expected.as_deref(), Some(target));
+        for threads in [0, 1, 2, 4, 8, 16, i32::MAX] {
+            assert_eq!(
+                brainstorm_search_core("", cfg, budget - 1, threads),
+                None,
+                "{case_name} crossed its budget with {threads} threads",
+            );
+            assert_eq!(
+                brainstorm_search_core("", cfg, budget, threads),
+                expected,
+                "{case_name} changed its earliest result with {threads} threads",
+            );
+        }
+        expected
     }
 
     fn source_oracle_passes_seed(seed: &str, cfg: &FilterConfig) -> bool {

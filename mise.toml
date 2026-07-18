@@ -56,6 +56,7 @@ check_cmd() {
 
 check_cmd rustup
 check_cmd cargo
+check_cmd python3
 check_cmd stylua
 check_cmd luajit
 check_cmd luarocks
@@ -64,8 +65,15 @@ check_cmd x86_64-w64-mingw32-gcc
 check_cmd x86_64-w64-mingw32-objdump
 check_cmd wine
 check_cmd file
+check_cmd sha256sum
 check_cmd zip
 check_cmd rsync
+
+if command -v wslpath >/dev/null && command -v cmd.exe >/dev/null; then
+  echo "ok: native Windows benchmark interop"
+else
+  echo "optional: wslpath/cmd.exe unavailable; use BENCH_EXECUTOR=wine for diagnostics"
+fi
 
 rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
 if ! rustup target list --installed | grep -qx "$rust_target"; then
@@ -315,6 +323,64 @@ wine "$harness" bench-compare \
 description = "Alias for bench-compare"
 run = "mise run bench-compare"
 
+[tasks.bench-current-compare]
+description = "Counterbalanced current-ABI DLL regression comparison"
+shell = "bash -c"
+run = '''
+set -euo pipefail
+baseline_input="${BENCH_BASELINE_DLL:?Set BENCH_BASELINE_DLL to a frozen current-ABI DLL}"
+candidate_input="${BENCH_CANDIDATE_DLL:-}"
+[[ -f "$baseline_input" ]] || { echo "baseline DLL not found: $baseline_input"; exit 1; }
+
+freeze_dir="$(mktemp -d /tmp/brainstorm-current-compare-XXXXXX)"
+cleanup() {
+  rm -f -- "$freeze_dir/baseline.dll" "$freeze_dir/candidate.dll"
+  rmdir -- "$freeze_dir"
+}
+trap cleanup EXIT
+
+baseline_source="$(readlink -f -- "$baseline_input")"
+baseline="$freeze_dir/baseline.dll"
+cp -- "$baseline_source" "$baseline"
+echo "Frozen baseline: $baseline_source"
+sha256sum "$baseline"
+
+candidate=""
+if [[ -n "$candidate_input" ]]; then
+  [[ -f "$candidate_input" ]] || { echo "candidate DLL not found: $candidate_input"; exit 1; }
+  candidate_source="$(readlink -f -- "$candidate_input")"
+  candidate="$freeze_dir/candidate.dll"
+  cp -- "$candidate_source" "$candidate"
+  echo "Frozen candidate: $candidate_source"
+  sha256sum "$candidate"
+fi
+
+mise run build-harness
+if [[ -z "$candidate" ]]; then
+  mise run build-rust
+  candidate="$TARGET_DIR/rust/$DLL"
+fi
+rust_target="${RUST_TARGET:-x86_64-pc-windows-gnu}"
+native_stage_args=()
+if [[ -n "${BENCH_NATIVE_STAGE_DIR:-}" ]]; then
+  native_stage_args=(--native-stage-dir "$BENCH_NATIVE_STAGE_DIR")
+fi
+python3 "$IMMO_DIR/scripts/bench_current_compare.py" \
+  --harness "$IMMO_DIR/target/$rust_target/release/immolate_dll_harness.exe" \
+  --baseline "$baseline" \
+  --candidate "$candidate" \
+  --executor "${BENCH_EXECUTOR:-native}" \
+  "${native_stage_args[@]}" \
+  --case "${BENCH_CASE:-ux}" \
+  --budget "${BENCH_BUDGET:-100000}" \
+  --threads "${BENCH_THREADS:-0}" \
+  --repeat "${BENCH_REPEAT:-31}" \
+  --warmup "${BENCH_WARMUP:-3}" \
+  --cycles "${BENCH_CURRENT_CYCLES:-4}" \
+  --min-ratio "${BENCH_CURRENT_MIN_RATIO:-0.99}" \
+  --min-regression-ms "${BENCH_CURRENT_MIN_REGRESSION_MS:-0.005}"
+'''
+
 [tasks.bench-full]
 description = "Full-suite Rust vs Original benchmark report"
 shell = "bash -c"
@@ -371,6 +437,7 @@ set -euo pipefail
 mise run fmt-rust-check
 mise run clippy-rust
 mise run test-rust
+python3 "$IMMO_DIR/scripts/bench_current_compare.py" --self-test
 mise run check-rust-dll
 mise run build-harness
 
@@ -404,15 +471,20 @@ shell = "bash -c"
 run = '''
 set -euo pipefail
 mise run lint-lua
+mise run test-lua
 mise run check-rust
 '''
+
+[tasks.test-lua]
+description = "Run mocked Lua frame and status-text lifecycle smoke"
+run = "luajit tests/lua_lifecycle_smoke.lua \"$(pwd)\""
 
 [tasks.format]
 description = "Format Lua and Rust"
 shell = "bash -c"
 run = '''
 set -euo pipefail
-lua_files=(Brainstorm.lua UI.lua steamodded_compat.lua)
+lua_files=(Brainstorm.lua UI.lua steamodded_compat.lua tests/lua_lifecycle_smoke.lua)
 stylua "${lua_files[@]}"
 cargo fmt --manifest-path "$IMMO_DIR/Cargo.toml"
 '''
@@ -428,13 +500,14 @@ run = '''
 set -euo pipefail
 export PATH="$HOME/.luarocks/bin:$PATH"
 lua_files=(Brainstorm.lua UI.lua steamodded_compat.lua)
-syntax_lua_files=("${lua_files[@]}" nativefs.lua)
+test_lua_files=(tests/lua_lifecycle_smoke.lua)
+syntax_lua_files=("${lua_files[@]}" "${test_lua_files[@]}" nativefs.lua)
 
 command -v stylua >/dev/null || { echo "stylua not found. Install Stylua, then run: mise run doctor"; exit 1; }
 command -v luajit >/dev/null || { echo "luajit not found. Install LuaJIT, then run: mise run doctor"; exit 1; }
 command -v luacheck >/dev/null || { echo "luacheck not found. Run: mise run setup-lua"; exit 1; }
 
-stylua --check "${lua_files[@]}"
+stylua --check "${lua_files[@]}" "${test_lua_files[@]}"
 for lua_file in "${syntax_lua_files[@]}"; do
   luajit -b "$lua_file" "/tmp/brainstorm-${lua_file//\//-}.luajit"
 done

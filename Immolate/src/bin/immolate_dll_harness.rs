@@ -1656,7 +1656,6 @@ mod windows_harness {
             }
         }
         print_result_mismatch_report(comparisons, color);
-        print_group_report(comparisons, min_ratio, color);
         print_regression_report(comparisons, min_ratio, color);
         print_noise_report(comparisons, color);
     }
@@ -1693,62 +1692,6 @@ mod windows_harness {
         }
         if mismatches.len() > 12 {
             println!("  ... {} more", mismatches.len() - 12);
-        }
-    }
-
-    fn print_group_report(comparisons: &[BenchComparison], min_ratio: f64, color: bool) {
-        print_section("Strict Group Speedups", color);
-        println!(
-            "{:<10} {:>8} {:>12} {:<24} {:<24}",
-            "group", "measured", "gmean", "best", "worst",
-        );
-        println!("{}", paint(color, ANSI_DIM, &"-".repeat(86)));
-        for group in bench_group_order() {
-            let group_comparisons: Vec<_> = comparisons
-                .iter()
-                .filter(|comparison| {
-                    comparison.rust.group == group && comparison.is_strictly_comparable()
-                })
-                .collect();
-            if group_comparisons.is_empty() {
-                continue;
-            }
-            let gmean = geometric_mean(
-                &group_comparisons
-                    .iter()
-                    .filter_map(|comparison| comparison.rust_vs_original_ratio())
-                    .collect::<Vec<_>>(),
-            );
-            let mut best = group_comparisons[0];
-            let mut worst = group_comparisons[0];
-            for comparison in &group_comparisons {
-                if comparison.rust_vs_original_ratio() > best.rust_vs_original_ratio() {
-                    best = comparison;
-                }
-                if comparison.rust_vs_original_ratio() < worst.rust_vs_original_ratio() {
-                    worst = comparison;
-                }
-            }
-            println!(
-                "{:<10} {:>8} {} {:<24} {:<24}",
-                group.label(),
-                group_comparisons.len(),
-                paint(
-                    color,
-                    ratio_color(gmean, min_ratio),
-                    &format!("{gmean:>12.3}x")
-                ),
-                format!(
-                    "{} {:.2}x",
-                    best.rust.case_name,
-                    best.rust_vs_original_ratio().expect("measured original")
-                ),
-                format!(
-                    "{} {:.2}x",
-                    worst.rust.case_name,
-                    worst.rust_vs_original_ratio().expect("measured original")
-                ),
-            );
         }
     }
 
@@ -1978,27 +1921,6 @@ mod windows_harness {
             lhs.result,
             rhs.result,
         );
-    }
-
-    fn bench_group_order() -> [BenchGroup; 8] {
-        [
-            BenchGroup::Baseline,
-            BenchGroup::Tags,
-            BenchGroup::Vouchers,
-            BenchGroup::Packs,
-            BenchGroup::Jokers,
-            BenchGroup::Souls,
-            BenchGroup::Deck,
-            BenchGroup::Ux,
-        ]
-    }
-
-    fn geometric_mean(values: &[f64]) -> f64 {
-        if values.is_empty() {
-            return 0.0;
-        }
-        let mean_ln = values.iter().map(|value| value.ln()).sum::<f64>() / values.len() as f64;
-        mean_ln.exp()
     }
 
     fn ratio_color(ratio: f64, min_ratio: f64) -> &'static str {
